@@ -1,5 +1,7 @@
 # Gleam
 
+**English** | [简体中文](README.md)
+
 An offline CD player for the Linux desktop.
 
 Gleam is a local CD player built with Tauri 2, React and libmpv.

@@ -1,5 +1,7 @@
 # Gleam
 
+[English](README.en.md) | **简体中文**
+
 一款给 Linux 桌面用的实体 CD 播放器。
 
 Gleam 是一个基于 Tauri 2、React 和 libmpv 开发的本地 CD 播放器。
