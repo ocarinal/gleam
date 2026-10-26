@@ -34,6 +34,7 @@ export function PlayerStage({
   cover,
   title,
   artist,
+  album,
   playing,
   progress,
   lyrics,
@@ -56,6 +57,7 @@ export function PlayerStage({
   cover: string | null;
   title: string;
   artist: string;
+  album: string | null;
   playing: boolean;
   progress: Progress | null;
   lyrics: LrcLine[];
@@ -76,97 +78,131 @@ export function PlayerStage({
   onCycleRepeat: () => void;
 }) {
   const pct = progress && progress.duration > 0 ? (progress.time / progress.duration) * 100 : 0;
+  const paused = !playing || (progress?.paused ?? true);
+
+  const progressRow = (
+    <div className="stage-progress-row">
+      <span className="sp-time">{progress ? fmtC(progress.time) : "0:00"}</span>
+      <div
+        className="pb-progress sp-bar"
+        onClick={(e) => {
+          if (!progress) return;
+          const r = e.currentTarget.getBoundingClientRect();
+          const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+          onSeek(progress.start + p * progress.duration);
+        }}
+      >
+        <div className="pb-progress-fill" style={{ width: `${pct}%` }} />
+        <div className="pb-progress-knob" style={{ left: `${pct}%` }} />
+      </div>
+      <span className="sp-time">
+        {progress ? `-${fmtC(Math.max(0, progress.duration - progress.time))}` : "--:--"}
+      </span>
+    </div>
+  );
+
+  const controls = (
+    <div className="stage-mini-ctl">
+      <button
+        className={"smc" + (shuffle ? " on" : "")}
+        onClick={onToggleShuffle}
+        title="随机播放"
+      >
+        <ShuffleIcon />
+      </button>
+      <button className="smc" onClick={onPrev} disabled={!playing} title="上一首">
+        ⏮
+      </button>
+      <button
+        className="smc-play"
+        onClick={onTogglePause}
+        disabled={!canPlay}
+        title={playing ? "播放/暂停" : "播放第 1 首"}
+      >
+        {playing ? (progress?.paused ? "▶" : "⏸") : "▶"}
+      </button>
+      <button className="smc" onClick={onNext} disabled={!playing} title="下一首">
+        ⏭
+      </button>
+      <button
+        className={"smc" + (repeat !== "off" ? " on" : "")}
+        onClick={onCycleRepeat}
+        title="循环: 关 / 全部 / 单曲"
+      >
+        <RepeatIcon one={repeat === "one"} />
+      </button>
+    </div>
+  );
+
   return (
     <div className={"stage" + (lyricsOnly ? " lyrics-only" : "")}>
-      {!lyricsOnly && (
-        <div className="stage-left">
+      {lyricsOnly && (
+        <div className="ly-backdrop" onClick={onExitOnly} title="点击返回封面" />
+      )}
+
+      {lyricsOnly ? (
+        <div className="stage-main stage-main-only">
+          <div className="stage-lyrics">
+            <LyricsInline
+              lines={lyrics}
+              time={progress?.time ?? 0}
+              source={lyricsSource}
+              onSeek={(t) => onSeek(t + (progress?.start ?? 0))}
+              onRetry={onRetryLyrics}
+              idle={playing ? undefined : `当前CD · ${title}`}
+              paused={paused}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="stage-main">
+            <div className="stage-meta">
+              {artist ? <div className="stage-kicker">{artist}</div> : null}
+              <div className="stage-song">{title}</div>
+              {album && album !== title ? <div className="stage-album">{album}</div> : null}
+            </div>
+
+            {lyricsOn && (
+              <div className="stage-lyrics">
+                <LyricsInline
+                  lines={lyrics}
+                  time={progress?.time ?? 0}
+                  source={lyricsSource}
+                  onSeek={(t) => onSeek(t + (progress?.start ?? 0))}
+                  onRetry={onRetryLyrics}
+                  idle={playing ? undefined : `当前CD · ${title}`}
+                  paused={paused}
+                />
+              </div>
+            )}
+
+            <div className="stage-footer">
+              {progressRow}
+              {controls}
+            </div>
+          </div>
+
           <div
-            className="cdart stage-cd"
+            className="stage-art"
             onClick={onCoverClick}
             title={lyrics.length > 0 ? "点击切换歌词" : undefined}
           >
-            {cover ? (
-              <img key={cover} className="cdcase" src={cover} alt="" />
-            ) : (
-              <div className="cdcase cdcase-empty">♫</div>
-            )}
-          </div>
-
-          <div className="stage-title">{title}</div>
-          <div className="stage-artist">{artist}</div>
-
-          <div className="stage-progress-row">
-            <span className="sp-time">{progress ? fmtC(progress.time) : "0:00"}</span>
-            <div
-              className="pb-progress sp-bar"
-              onClick={(e) => {
-                if (!progress) return;
-                const r = e.currentTarget.getBoundingClientRect();
-                const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-                onSeek(progress.start + p * progress.duration);
-              }}
-            >
-              <div className="pb-progress-fill" style={{ width: `${pct}%` }} />
-              <div className="pb-progress-knob" style={{ left: `${pct}%` }} />
+            <div className="stage-cd">
+              {cover ? (
+                <img key={cover} className="cdcase" src={cover} alt="" />
+              ) : (
+                <div className="cdcase cdcase-empty">♫</div>
+              )}
             </div>
-            <span className="sp-time">
-              {progress ? `-${fmtC(Math.max(0, progress.duration - progress.time))}` : "--:--"}
-            </span>
           </div>
-
-          <div className="stage-mini-ctl">
-            <button
-              className={"smc" + (shuffle ? " on" : "")}
-              onClick={onToggleShuffle}
-              title="随机播放"
-            >
-              <ShuffleIcon />
-            </button>
-            <button className="smc" onClick={onPrev} disabled={!playing} title="上一首">
-              ⏮
-            </button>
-            <button
-              className="smc-play"
-              onClick={onTogglePause}
-              disabled={!canPlay}
-              title={playing ? "播放/暂停" : "播放第 1 首"}
-            >
-              {playing ? (progress?.paused ? "▶" : "⏸") : "▶"}
-            </button>
-            <button className="smc" onClick={onNext} disabled={!playing} title="下一首">
-              ⏭
-            </button>
-            <button
-              className={"smc" + (repeat !== "off" ? " on" : "")}
-              onClick={onCycleRepeat}
-              title="循环: 关 / 全部 / 单曲"
-            >
-              <RepeatIcon one={repeat === "one"} />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {lyricsOn && (
-      <div className="stage-lyrics">
-        <LyricsInline
-          lines={lyrics}
-          time={progress?.time ?? 0}
-          source={lyricsSource}
-          onSeek={(t) => onSeek(t + (progress?.start ?? 0))}
-          onRetry={onRetryLyrics}
-          idle={playing ? undefined : `当前CD · ${title}`}
-        />
-      </div>
+        </>
       )}
 
       {lyricsOnly && (
-        <>
-          <div className="ly-backdrop" onClick={onExitOnly} title="点击返回封面" />
-          <button className="ly-back" onClick={onExitOnly} title="返回封面">
-            ✕
-          </button>
-        </>
+        <button className="ly-back" onClick={onExitOnly} title="返回封面">
+          ✕
+        </button>
       )}
     </div>
   );

@@ -485,12 +485,7 @@ export default function App() {
           {!loading && disc && view === "playing" && (
             <div className="playing-wrap">
               <div className="playing-head-row">
-                <div className="page-head playing-head">
-                  <div className="page-title2">正在播放</div>
-                  <div className="page-sub2">
-                    当前播放CD · {release?.title ?? curTitle ?? "—"}
-                  </div>
-                </div>
+                <div className="playing-kicker">正在播放</div>
                 <div className="stage-toolbar">
                   <button className="st-btn" onClick={onStop} disabled={!playing} title="停止">
                     ⏹
@@ -499,7 +494,7 @@ export default function App() {
                     className={"st-btn" + (lyricsOn ? " on" : "")}
                     onClick={() => setLyricsOn((v) => !v)}
                     disabled={lyricsOnly}
-                    title={lyricsOnly ? "歌词模式中 · 点击左侧或 ✕ 返回" : "歌词开关"}
+                    title={lyricsOnly ? "歌词模式中 · 点击空白处或 ✕ 返回" : "歌词开关"}
                   >
                     ♪
                   </button>
@@ -527,6 +522,7 @@ export default function App() {
                 cover={cover}
                 title={curTitle}
                 artist={curArtist}
+                album={release?.title ?? null}
                 playing={!!playing}
                 progress={progress}
                 lyrics={lrcLines}

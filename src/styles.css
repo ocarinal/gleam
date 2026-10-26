@@ -189,78 +189,76 @@ body {
 
 /* ---------- 中央舞台 (正在播放) ---------- */
 
-/* 正在播放视图: 标题区 + 舞台 */
+/* 正在播放视图: 顶部细条 + 左歌词 / 右封面 */
 .playing-wrap {
   flex: 1 1 auto; min-height: 0;
   display: flex; flex-direction: column;
-  padding: 30px 40px 14px;
+  padding: 26px 40px 18px;
   container-type: inline-size;
 }
-.playing-head { margin: 0 0 2px; }
+.playing-kicker {
+  font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+  color: rgba(255,255,255,.32);
+}
 .stage {
   position: relative;
   flex: 1 1 auto; min-height: 0;
   display: flex; flex-direction: row; align-items: center; justify-content: center;
-  gap: clamp(20px, 3.5vw, 48px);
-  padding: 6vh clamp(20px, 5vw, 56px);
+  gap: clamp(26px, 4vw, 64px);
+  padding: 0;
   overflow: hidden;
 }
-.stage-bg {
-  position: absolute; inset: -80px;
-  background-size: cover; background-position: center;
-  filter: blur(100px) saturate(1.45) brightness(0.45);
-  transform: scale(1.2);
+.stage-main {
+  position: relative; z-index: 2;
+  flex: 1 1 0; min-width: 0; max-width: 760px;
+  height: min(76vh, 820px);
+  display: flex; flex-direction: column;
 }
-.stage-left {
+.stage-meta { flex: none; margin-bottom: clamp(16px, 2.6vh, 28px); }
+.stage-kicker {
+  font-size: 12px; letter-spacing: .08em; color: rgba(255,255,255,.5);
+  margin-bottom: 7px;
+}
+.stage-song {
+  font-size: clamp(27px, 2.5vw, 40px); line-height: 1.12;
+  font-weight: 750; letter-spacing: -.02em; color: #fff;
+}
+.stage-album {
+  margin-top: 9px; font-size: 10.5px; letter-spacing: .2em;
+  text-transform: uppercase; color: rgba(255,255,255,.36);
+}
+.stage-art {
   position: relative; z-index: 2;
   flex: 0 0 auto;
-  display: flex; flex-direction: column; align-items: center;
-  /* 歌词面板要留出可读宽度: 封面不再固定 420，随舞台宽度收缩 */
-  width: min(38vh, 420px, 50%);
+  width: min(38vh, 420px, 42%);
+  cursor: pointer;
+  transition: transform .3s cubic-bezier(.2,.7,.3,1);
 }
-.stage.lyrics-only { gap: 0; }
+.stage-art:hover { transform: translateY(-4px) scale(1.012); }
 .stage-cd {
   width: 100%; aspect-ratio: 1;
-  border-radius: 12px; overflow: hidden;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.6);
-  cursor: pointer;
-  transition: transform 0.25s;
+  border-radius: 14px; overflow: hidden;
+  background: var(--card);
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255,255,255,.07);
 }
-.stage-cd:hover { transform: scale(1.02); }
-.stage-cd .cdcase { width: 100%; height: 100%; object-fit: cover; border-radius: 12px; }
-.cdart {
-  position: relative; width: 290px; aspect-ratio: 1;
-  margin-bottom: 24px; cursor: pointer;
+.stage-cd .cdcase { width: 100%; height: 100%; object-fit: cover; border-radius: 14px; box-shadow: none; }
+.stage.lyrics-only .stage-main {
+  max-width: 900px; height: min(82vh, 900px); margin: 0 auto;
 }
-.cddisc {
-  position: absolute; right: -60px; top: 10px;
-  width: 72%; aspect-ratio: 1; border-radius: 50%;
-  background:
-    radial-gradient(circle at 50% 50%, transparent 0 21%, rgba(10, 12, 18, 0.9) 22% 27%, transparent 28%),
-    conic-gradient(from 190deg, #183048, #2e7bd6, #4cc2ff, #9adcff, #2e7bd6, #183048);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
-  transform: rotate(12deg);
-  opacity: 0.95;
-  transition: opacity 0.3s;
-}
-.cddisc.spin { animation: cd-spin 14s linear infinite; }
-@keyframes cd-spin { to { transform: rotate(372deg); } }
+.stage.lyrics-only .li-line { font-size: clamp(26px, 2.8vw, 44px); }
 .cdcase {
   position: relative; z-index: 2;
   width: 100%; aspect-ratio: 1; object-fit: cover;
-  border-radius: 8px; background: var(--card);
-  box-shadow: 0 22px 55px rgba(0, 0, 0, 0.6);
+  border-radius: 14px; background: var(--card);
   display: flex; align-items: center; justify-content: center;
 }
 .cdcase-empty { color: var(--muted); font-size: 52px; }
-.stage-title { font-size: 15px; font-weight: 700; margin-top: 18px; color: rgba(255,255,255,0.96); text-align: center; }
-.stage-artist { color: rgba(255,255,255,0.55); font-size: 13px; margin: 5px 0 2px; text-align: center; }
 .stage-progress-row {
-  width: 100%; display: flex; align-items: center; gap: 10px; margin-top: 12px;
+  width: 100%; display: flex; align-items: center; gap: 10px;
 }
-.sp-bar { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.25); }
+.sp-bar { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.22); }
 .stage-mini-ctl {
-  display: flex; align-items: center; justify-content: center; gap: 22px; margin-top: 8px;
+  display: flex; align-items: center; justify-content: flex-start; gap: 18px; margin-top: 10px;
 }
 .smc {
   background: transparent; border: 0; color: rgba(255,255,255,0.72);
@@ -319,38 +317,38 @@ body {
 .ctl-play:hover:not(:disabled) { transform: scale(1.05); filter: brightness(1.08); }
 .ctl-play:disabled { opacity: 0.45; cursor: default; }
 
-/* ---------- 内嵌歌词面板 (封面右侧) ---------- */
+/* ---------- 内嵌歌词面板 (封面左侧) ---------- */
 .stage-lyrics {
   position: relative; z-index: 2;
-  flex: 1 1 auto; max-width: 760px;
-  height: min(76vh, 780px);
-  min-height: 0;
-  min-width: 0;
+  flex: 1 1 auto; min-height: 0; min-width: 0;
 }
-.stage.lyrics-only .stage-lyrics { max-width: 820px; }
 .li {
-  height: 100%; overflow-y: auto; padding: 14vh 4px;
+  height: 100%; overflow-y: auto; padding: 10vh 0 12vh;
   scroll-behavior: smooth;
-  mask-image: linear-gradient(180deg, transparent 0%, #000 12%, #000 84%, transparent 100%);
-  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 12%, #000 84%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 14%, #000 85%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 14%, #000 85%, transparent 100%);
 }
-.li-source { color: var(--muted); font-size: 11px; padding: 0 6px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.li-source {
+  color: rgba(255,255,255,.26); font-size: 11px; letter-spacing: .06em;
+  padding: 0 2px 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .li-line {
-  font-size: clamp(22px, 2.6vw, 33px); line-height: 1.5; margin: 0.55em 0;
-  font-weight: 500; letter-spacing: 0.2px;
-  color: rgba(255, 255, 255, 0.34);
-  cursor: pointer;
-  transition: color 0.3s ease, transform 0.3s ease;
+  font-size: clamp(23px, 2.5vw, 38px); line-height: 1.38; margin: 0.34em 0;
+  font-weight: 500; letter-spacing: .01em;
+  color: rgba(255, 255, 255, 0.24);
+  cursor: pointer; text-align: left;
+  transition: color 0.35s ease;
 }
-.li-line:hover { color: rgba(255, 255, 255, 0.72); }
-.li-line.active {
-  color: #fff; font-weight: 700;
-  transform: scale(1.04); transform-origin: left center;
-}
+.li-line:hover { color: rgba(255, 255, 255, 0.55); }
+.li-line.active { color: #fff; font-weight: 700; }
+.li-ch { color: rgba(255,255,255,.28); transition: color 0.2s linear; }
+.li-line.active .li-ch.on { color: #fff; text-shadow: 0 0 22px rgba(255,255,255,.16); }
 .li-tr {
-  display: block; font-size: 0.72em;
-  color: rgba(76, 194, 255, 0.85); font-weight: 400; margin-top: 2px;
+  display: block; font-size: 0.52em; line-height: 1.45;
+  color: rgba(125, 205, 255, 0.55); font-weight: 400;
+  margin-top: 0.32em; letter-spacing: .01em;
 }
+.li-line.active .li-tr { color: rgba(125, 205, 255, 0.88); }
 
 .li-none {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -368,10 +366,10 @@ body {
 }
 .li-retry:hover { border-color: var(--accent); background: rgba(76,194,255,0.12); color: #fff; }
 
-/* 歌词模式: 左侧点击区域返回封面 */
+/* 歌词模式: 空白区域返回封面 */
+.stage { position: relative; }
 .ly-backdrop {
-  position: absolute; left: 0; top: 0; bottom: 0;
-  width: 42%; z-index: 2; cursor: pointer;
+  position: absolute; inset: 0; z-index: 1; cursor: pointer;
 }
 .ly-back {
   position: absolute; top: 18px; right: 22px; z-index: 3;
@@ -380,17 +378,12 @@ body {
   border: 1px solid var(--border); cursor: pointer; font-size: 14px;
 }
 .ly-back:hover { background: rgba(255, 255, 255, 0.14); }
-.stage { position: relative; }
-/* 窗口窄: 只显示封面 */
-@media (max-width: 1280px) {
-  .stage-lyrics { display: none; }
-  .stage.lyrics-only .stage-lyrics { display: block; }
-}
-/* 侧栏 + 曲目面板会吃掉大量宽度: 按舞台自身宽度收起歌词，
-   避免 1680px 窗口下歌词只剩一两个字宽 (每个字竖着排)。 */
-@container (max-width: 620px) {
-  .stage-lyrics { display: none; }
-  .stage.lyrics-only .stage-lyrics { display: block; }
+
+/* 舞台太窄: 保歌词，收起封面 */
+@container (max-width: 520px) {
+  .stage-art { display: none; }
+  .stage-main { max-width: none; }
+  .stage { padding: 0 4px; }
 }
 
 /* ---------- 舞台右上工具条 ---------- */
@@ -1010,9 +1003,11 @@ body.no-amb .app-body::before { animation: none !important; }
 .nav-item { font-size: calc(13.5px * var(--fs)); }
 .page-title2 { font-size: calc(24px * var(--fs)); }
 .page-sub2 { font-size: calc(13px * var(--fs)); }
-.stage-title { font-size: calc(15px * var(--fs)); }
-.stage-artist { font-size: calc(13px * var(--fs)); }
-.li-line { font-size: calc(clamp(22px, 2.6vw, 33px) * var(--fs)); }
+.stage-song { font-size: calc(clamp(27px, 2.5vw, 40px) * var(--fs)); }
+.stage-kicker { font-size: calc(12px * var(--fs)); }
+.stage-album { font-size: calc(10.5px * var(--fs)); }
+.li-line { font-size: calc(clamp(23px, 2.5vw, 38px) * var(--fs)); }
+.stage.lyrics-only .li-line { font-size: calc(clamp(26px, 2.8vw, 44px) * var(--fs)); }
 .panel-track { font-size: calc(13px * var(--fs)); }
 .queue-row { font-size: calc(13.5px * var(--fs)); }
 .info-title { font-size: calc(23px * var(--fs)); }
