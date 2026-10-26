@@ -50,6 +50,18 @@ export interface LyricsResult {
   synced: boolean;
   source: string;
   cover: string | null;
+  bilingual: boolean;
+  wordTimed: boolean;
+}
+
+export type LyricSource = "auto" | "lrclib" | "netease" | "qq" | "kugou";
+
+export interface AlbumExtra {
+  albumDescription: string | null;
+  artistName: string | null;
+  artistBio: string | null;
+  artistAvatar: string | null;
+  source: string | null;
 }
 
 export interface Progress {
@@ -66,6 +78,8 @@ export interface LibraryEntry {
   release: Release;
   savedAt: string;
   medium: number | null;
+  group: string | null;
+  discLabel: string | null;
 }
 
 export const detectDisc = () => invoke<TocInfo>("detect_disc");
@@ -91,8 +105,29 @@ export const fetchLyrics = (
   artist: string,
   lengthMs: number | null,
   recordingId: string | null,
-  force = false
-) => invoke<LyricsResult>("fetch_lyrics", { title, artist, lengthMs, recordingId, force });
+  force = false,
+  source: LyricSource = "auto"
+) =>
+  invoke<LyricsResult>("fetch_lyrics", {
+    title,
+    artist,
+    lengthMs,
+    recordingId,
+    force,
+    source,
+  });
+export const fetchAlbumExtra = (
+  album: string,
+  artist: string,
+  year: string | null,
+  trackCount: number | null
+) =>
+  invoke<AlbumExtra | null>("fetch_album_extra", {
+    album,
+    artist,
+    year,
+    trackCount,
+  });
 export const listLibrary = () => invoke<LibraryEntry[]>("list_library");
 export const libraryCover = (releaseId: string, title: string, artist: string) =>
   invoke<string | null>("library_cover", { releaseId, title, artist });
@@ -102,6 +137,12 @@ export const libraryRemove = (discId: string) =>
   invoke<void>("library_remove", { discid: discId });
 export const librarySetMedium = (discId: string, idx: number) =>
   invoke<void>("library_set_medium", { discid: discId, idx });
+export const librarySetGroup = (
+  discId: string,
+  group: string | null,
+  label: string | null
+) =>
+  invoke<void>("library_set_group", { discid: discId, group, label });
 export const refreshCover = (releaseId: string, rgId: string | null, title: string, artist: string) =>
   invoke<string | null>("refresh_cover", { releaseId, rgId, title, artist });
 export const listFonts = () => invoke<string[]>("list_fonts");

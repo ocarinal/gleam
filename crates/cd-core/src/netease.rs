@@ -149,3 +149,42 @@ pub fn fetch_lyrics(song_id: u64) -> Result<NeteaseLyrics, String> {
         .filter(|s| !s.trim().is_empty());
     Ok(NeteaseLyrics { lrc, tlyric })
 }
+
+/// 多源聚合用的统一候选
+pub fn candidate(
+    title: &str,
+    artist: &str,
+    length_ms: Option<u64>,
+) -> Option<crate::lyrics::Candidate> {
+    let songs = search(title, artist, length_ms).ok()?;
+    let b = match length_ms {
+        Some(_) => songs.iter().find(|s| {
+            s.duration
+                .map(|d| crate::lyrics::duration_ok(Some(d as f64 / 1000.0), length_ms, 6.0))
+                .unwrap_or(false)
+        })?,
+        None => songs.first()?,
+    };
+    let ly = fetch_lyrics(b.id).ok()?;
+    if ly.lrc.trim().is_empty() {
+        return None;
+    }
+    let arts = b
+        .artists
+        .iter()
+        .map(|a| a.name.clone())
+        .collect::<Vec<_>>()
+        .join(" / ");
+    let source = if arts.trim().is_empty() {
+        format!("网易云音乐 · {}", b.name)
+    } else {
+        format!("网易云音乐 · {} — {}", arts, b.name)
+    };
+    Some(crate::lyrics::Candidate {
+        source,
+        synced: crate::lyrics::has_timestamps(&ly.lrc),
+        word_timed: crate::lyrics::has_word_tags(&ly.lrc),
+        tlyric: ly.tlyric.filter(|t| !t.trim().is_empty()),
+        lrc: ly.lrc,
+    })
+}

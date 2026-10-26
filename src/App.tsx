@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   confirmReleaseForDisc,
   detectDisc,
   driveScan,
   fetchCover,
+  libraryCover,
   fetchLyrics,
   mediaState,
   onDriveMedia,
@@ -21,19 +23,95 @@ import {
   saveCover,
   searchReleases,
   type LyricsResult,
+  type LyricSource,
   type Progress,
   type Release,
   type TocInfo,
 } from "./api";
 import { parseLrc, type LrcLine } from "./lrc";
 import { NavSidebar } from "./components/NavSidebar";
+import { HomeView } from "./components/HomeView";
 import { PlayerStage } from "./components/PlayerStage";
 import { TrackPanel } from "./components/TrackPanel";
-import { InfoView, QueueView, SettingsView } from "./components/Views";
+import { InfoView, SettingsView } from "./components/Views";
 import { LibraryView } from "./components/LibraryView";
 import { SearchPanel } from "./components/SearchPanel";
+import { ManualLyricsModal } from "./components/ManualLyricsModal";
 
-type View = "playing" | "tracks" | "info" | "queue" | "library" | "settings";
+type View = "home" | "playing" | "tracks" | "info" | "library" | "settings";
+
+type ViewTransitionLike = { finished?: Promise<void> };
+
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (cb: () => void) => ViewTransitionLike;
+};
+
+/** 支持 View Transitions 时让封面从首页滑到舞台，否则直接切页 */
+function withViewTransition(fn: () => void) {
+  const doc = document as ViewTransitionDocument;
+  if (!doc.startViewTransition) {
+    fn();
+    return;
+  }
+  const root = document.documentElement;
+  root.classList.add("vt-busy");
+  let finished = false;
+  const done = () => {
+    if (finished) return;
+    finished = true;
+    root.classList.remove("vt-busy");
+  };
+  let ran = false;
+  try {
+    const vt = doc.startViewTransition(() => {
+      ran = true;
+      flushSync(fn);
+    });
+    if (vt?.finished) {
+      vt.finished.finally(done).catch(() => {});
+    } else {
+      setTimeout(done, 700);
+    }
+  } catch {
+    done();
+    if (!ran) fn();
+  }
+}
+
+function readLyricSource(): LyricSource {
+  const v = localStorage.getItem("sd-lyric-source");
+  return v === "lrclib" || v === "netease" || v === "qq" || v === "kugou"
+    ? v
+    : "auto";
+}
+
+const MANUAL_LYRIC_KEY = "sd-manual-lyrics";
+
+function lyricCacheKey(title: string, artist: string, lengthMs: number | null) {
+  return `${title}|${artist}|${lengthMs ?? ""}`;
+}
+
+function readManualLyrics(): Record<string, LyricsResult> {
+  try {
+    const v = JSON.parse(localStorage.getItem(MANUAL_LYRIC_KEY) ?? "{}");
+    return v && typeof v === "object" ? v : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveManualLyrics(key: string, result: LyricsResult) {
+  const map = readManualLyrics();
+  map[key] = result;
+  const entries = Object.entries(map);
+  const trimmed =
+    entries.length > 80 ? Object.fromEntries(entries.slice(-80)) : map;
+  try {
+    localStorage.setItem(MANUAL_LYRIC_KEY, JSON.stringify(trimmed));
+  } catch {
+    /* ignore quota */
+  }
+}
 
 function loadFavs(): Set<string> {
   try {
@@ -45,7 +123,7 @@ function loadFavs(): Set<string> {
 
 export default function App() {
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<View>("playing");
+  const [view, setView] = useState<View>("home");
   const [disc, setDisc] = useState<TocInfo | null>(null);
   const [realRelease, setRealRelease] = useState<Release | null>(null);
   const [mediumIdx, setMediumIdx] = useState<number | null>(null);
@@ -55,13 +133,16 @@ export default function App() {
   const [lyricsOnly, setLyricsOnly] = useState(false);
   const [lrcLines, setLrcLines] = useState<LrcLine[]>([]);
   const [lrcSource, setLrcSource] = useState("");
+  const [lyricSourceMode, setLyricSourceMode] = useState<LyricSource>(readLyricSource);
+  const [manualLyricsOpen, setManualLyricsOpen] = useState(false);
   const [playing, setPlaying] = useState<{ no: number; title: string } | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [status, setStatus] = useState("");
   const [volume, setVolume] = useState(80);
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState<"off" | "all" | "one">("off");
-  const [panelVisible, setPanelVisible] = useState(true);
+  const [panelVisible, setPanelVisible] = useState(false);
+  const [queue, setQueue] = useState<number[]>([]);
   const [driveState, setDriveState] = useState<"disc" | "empty" | "unknown" | null>(null);
   const [favs, setFavs] = useState<Set<string>>(loadFavs);
   const [settings, setSettings] = useState<any>(() => {
@@ -106,6 +187,11 @@ export default function App() {
   useEffect(() => {
     repeatRef.current = repeat;
   }, [repeat]);
+  const queueRef = useRef<number[]>([]);
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
+  const playStartedAt = useRef(0);
   const volumeRef = useRef(volume);
   useEffect(() => {
     volumeRef.current = volume;
@@ -115,14 +201,24 @@ export default function App() {
     r?.artistCredit?.map((a) => a.name).join(" / ") || "";
 
   const loadCover = useCallback(async (r: Release) => {
+    // 封面是专辑级资源: 用专辑名检索网易云兜底。
+    // (旧缓存里 artistCredit 可能为空，用首曲名会搜到同名的其它歌手)
+    const title = r.title || r.media?.[0]?.tracks?.[0]?.title || "";
+    const artist = r.artistCredit?.map((a) => a.name).join(" / ") ?? "";
+    // 先用光盘库同款封面 (缓存/网易云, 快) 兜底, 避免 CAA 慢时首页空着
+    let quick: string | null = null;
     try {
-      // 封面是专辑级资源: 用专辑名检索网易云兜底。
-      // (旧缓存里 artistCredit 可能为空，用首曲名会搜到同名的其它歌手)
-      const title = r.title || r.media?.[0]?.tracks?.[0]?.title || "";
-      const artist = r.artistCredit?.map((a) => a.name).join(" / ") ?? "";
-      setCover(await fetchCover(r.id, r.releaseGroup?.id ?? null, title, artist));
+      quick = await libraryCover(r.id, title, artist);
+      if (quick) setCover(quick);
     } catch {
-      setCover(null);
+      /* ignore */
+    }
+    try {
+      const full = await fetchCover(r.id, r.releaseGroup?.id ?? null, title, artist);
+      if (full) setCover(full);
+      else if (!quick) setCover(null);
+    } catch {
+      if (!quick) setCover(null);
     }
   }, []);
 
@@ -151,6 +247,13 @@ export default function App() {
     return { ...realRelease, media: [meds[i]] };
   }, [realRelease, mediumIdx]);
 
+  // 播放队列独立于光盘物理顺序; 换碟时重置
+  useEffect(() => {
+    setQueue(
+      disc ? Array.from({ length: disc.trackCount }, (_, i) => i + 1) : []
+    );
+  }, [disc?.discid, disc?.trackCount]);
+
   const applyRelease = useCallback(
     async (r: Release) => {
       setRealRelease(r);
@@ -167,11 +270,13 @@ export default function App() {
     setPlaying(null);
     setProgress(null);
     setLrcLines([]);
+    setView("home");
   }, []);
 
   const identifyDisc = useCallback(async () => {
     if (identifyingRef.current) return;
     identifyingRef.current = true;
+    if (!playingRef.current) setView("home");
     setLoading(true);
     setRealRelease(null);
     setCover(null);
@@ -259,6 +364,29 @@ export default function App() {
     if (!tno) return;
     const cur = playingRef.current;
     if (cur && tno !== cur.no) {
+      // 刚点播/切歌时播放器可能先停在碟首再 seek, 忽略这段时间的错位
+      if (Date.now() - playStartedAt.current < 6000) return;
+      const q = queueRef.current;
+      const qi = q.indexOf(cur.no);
+      const expected = qi >= 0 && qi + 1 < q.length ? q[qi + 1] : null;
+      // 队列顺序与光盘物理顺序不一致时, 在曲目边界切到队列的下一首
+      if (!shuffleRef.current && repeatRef.current !== "one") {
+        if (expected !== null && tno !== expected) {
+          void onPlayRef.current(expected);
+          return;
+        }
+        if (expected === null) {
+          if (repeatRef.current === "all" && q.length > 0) {
+            void onPlayRef.current(q[0]);
+          } else {
+            void playerStop().catch(() => {});
+            setPlaying(null);
+            setProgress(null);
+            setStatus("播放队列已结束");
+          }
+          return;
+        }
+      }
       setPlaying({ no: tno, title: trackTitle(tno) });
       void loadLyrics(tno);
       if (repeatRef.current === "one") {
@@ -275,7 +403,7 @@ export default function App() {
     const un2 = onEnded(() => {
       // 整碟播完 (单曲不会触发; 曲目切换是 chapter 边界, 由下方 trackNo effect 处理)
       if (repeatRef.current !== "off" && discRef.current) {
-        void onPlayRef.current(1); // 循环全部: 从头再来
+        void onPlayRef.current(queueRef.current[0] ?? 1); // 循环全部: 队列开头
       } else {
         setPlaying(null);
         setProgress(null);
@@ -290,11 +418,19 @@ export default function App() {
 
   const onPlayRef = useRef<(no: number) => Promise<void>>(async () => {});
   const lyricReq = useRef(0);
+  const lyricSourceRef = useRef<LyricSource>(lyricSourceMode);
+  useEffect(() => {
+    lyricSourceRef.current = lyricSourceMode;
+  }, [lyricSourceMode]);
 
   const trackTitle = (no: number) =>
     release?.media?.[0]?.tracks?.[no - 1]?.title ?? `曲目 ${no}`;
 
-  const loadLyrics = async (no: number, force = false) => {
+  const loadLyrics = async (
+    no: number,
+    force = false,
+    source: LyricSource = lyricSourceRef.current
+  ) => {
     if (!autoLyricsRef.current) {
       setLrcLines([]);
       setLrcSource("");
@@ -303,7 +439,7 @@ export default function App() {
     // 切歌先清空 + 请求编号 (过期结果丢弃)
     const reqId = ++lyricReq.current;
     setLrcLines([]);
-    setLrcSource("歌词更新中…");
+    setLrcSource("正在搜索歌词源…");
     const finish = (lines: LrcLine[], source: string) => {
       if (lyricReq.current !== reqId) return;
       setLrcLines(lines);
@@ -314,15 +450,24 @@ export default function App() {
       finish([], "无歌词");
       return;
     }
-    // 7 秒硬超时: 请求再慢也不能卡住界面文案
-    const timer = setTimeout(() => finish([], "未找到歌词"), 7000);
+    // 手动查找并保存过的歌词: 自动模式下直接命中, 不再联网
+    if (source === "auto") {
+      const saved = readManualLyrics()[lyricCacheKey(mt.title, artists(release), mt.length)];
+      if (saved?.lrc?.trim()) {
+        finish(parseLrc(saved.lrc, saved.tlyric), saved.source || "手动歌词");
+        return;
+      }
+    }
+    // 多源歌词并行搜索: 12 秒后端截止，前端留一点余量
+    const timer = setTimeout(() => finish([], "未找到歌词"), 14000);
     try {
       const lr: LyricsResult = await fetchLyrics(
         mt.title,
         artists(release),
         mt.length,
         mt.recording?.id ?? null,
-        force
+        force,
+        source
       );
       clearTimeout(timer);
       if (!lr.lrc.trim()) {
@@ -337,6 +482,48 @@ export default function App() {
     }
   };
 
+  const pickLyricSource = (source: LyricSource) => {
+    setLyricSourceMode(source);
+    lyricSourceRef.current = source;
+    localStorage.setItem("sd-lyric-source", source);
+    const cur = playingRef.current;
+    if (cur) void loadLyrics(cur.no, true, source);
+  };
+
+  const manualLyricsSearch = async (title: string, artist: string) => {
+    const cur = playingRef.current;
+    if (!cur) return false;
+    const mt = release?.media?.[0]?.tracks?.[cur.no - 1];
+    if (!mt) return false;
+    // 取消仍在途的自动搜索, 避免它稍后覆盖手动结果
+    const reqId = ++lyricReq.current;
+    try {
+      const lr = await fetchLyrics(
+        title,
+        artist,
+        mt.length,
+        mt.recording?.id ?? null,
+        true,
+        "auto"
+      );
+      if (lyricReq.current !== reqId) return false;
+      if (!lr.lrc.trim()) return false;
+      const saved: LyricsResult = {
+        ...lr,
+        source: `手动 · ${lr.source}`,
+      };
+      saveManualLyrics(
+        lyricCacheKey(mt.title, artists(release), mt.length),
+        saved
+      );
+      setLrcLines(parseLrc(saved.lrc, saved.tlyric));
+      setLrcSource(saved.source);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const jumpToRandom = () => {
     const d = discRef.current;
     const cur = playingRef.current;
@@ -348,6 +535,7 @@ export default function App() {
 
   const onPlay = async (no: number) => {
     if (!disc) return;
+    playStartedAt.current = Date.now();
     // 歌名一律现取 (上一首/下一首/自动连播不会错位)
     const title = trackTitle(no);
     setPlaying({ no, title });
@@ -362,6 +550,14 @@ export default function App() {
       return;
     }
     void loadLyrics(no);
+  };
+
+  /** 首页点曲目: 封面通过 View Transition 滑到右侧，页面切到正在播放 */
+  const playFromHome = (no: number) => {
+    withViewTransition(() => {
+      void onPlay(no);
+      setView("playing");
+    });
   };
 
   const onTogglePause = async () => {
@@ -388,19 +584,53 @@ export default function App() {
 
   const onPrev = () => {
     const cur = playingRef.current;
-    if (cur && cur.no > 1) void onPlay(cur.no - 1);
+    if (!cur) return;
+    const q = queueRef.current;
+    const i = q.indexOf(cur.no);
+    if (i > 0) void onPlay(q[i - 1]);
   };
 
   const onNext = () => {
     const cur = playingRef.current;
     const d = discRef.current;
-    if (shuffleRef.current && cur && d && d.trackCount > 1) {
+    if (!cur) return;
+    if (shuffleRef.current && d && d.trackCount > 1) {
       let n = cur.no;
       while (n === cur.no) n = 1 + Math.floor(Math.random() * d.trackCount);
       void onPlay(n);
       return;
     }
-    if (cur && d && cur.no < d.trackCount) void onPlay(cur.no + 1);
+    const q = queueRef.current;
+    const i = q.indexOf(cur.no);
+    if (i >= 0 && i + 1 < q.length) {
+      void onPlay(q[i + 1]);
+    } else if (repeatRef.current !== "off" && q.length > 0) {
+      void onPlay(q[0]);
+    }
+  };
+
+  const reorderQueue = (from: number, to: number) => {
+    setQueue((q) => {
+      if (from === to || from < 0 || to < 0 || from >= q.length || to >= q.length)
+        return q;
+      const next = [...q];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  /** 右键曲目: 插到当前播放的下一首 */
+  const playNextInQueue = (no: number) => {
+    setQueue((q) => {
+      if (playingRef.current?.no === no) return q;
+      const rest = q.filter((n) => n !== no);
+      const ci = playingRef.current ? rest.indexOf(playingRef.current.no) : -1;
+      if (ci >= 0) rest.splice(ci + 1, 0, no);
+      else rest.unshift(no);
+      return rest;
+    });
+    setStatus(`已加入下一首播放：${trackTitle(no)}`);
   };
 
   const onStop = async () => {
@@ -461,6 +691,9 @@ export default function App() {
           disc={disc}
           discTitle={release?.title ?? null}
           discYear={release?.date?.slice(0, 4) ?? null}
+          discArtist={curArtist || null}
+          nowTitle={playing?.title ?? null}
+          nowArtist={playing ? curArtist : null}
           driveState={driveState}
           hasPlaying={!!playing}
           onNav={(v) => setView(v as View)}
@@ -468,7 +701,7 @@ export default function App() {
         />
 
         <main className="center">
-          <div className="view-fade" key={`${view}-${disc?.discid ?? "none"}`}>
+          <div className={"view-fade" + (view === "playing" ? " playing-fade" : "")} key={`${view}-${disc?.discid ?? "none"}`}>
           {loading && <div className="center-hint">正在连接光驱…</div>}
 
           {!loading && !disc && (
@@ -482,10 +715,19 @@ export default function App() {
             </div>
           )}
 
+          {!loading && disc && view === "home" && (
+            <HomeView
+              cover={cover}
+              disc={disc}
+              release={release}
+              playing={playing}
+              onPlayTrack={playFromHome}
+            />
+          )}
+
           {!loading && disc && view === "playing" && (
             <div className="playing-wrap">
               <div className="playing-head-row">
-                <div className="playing-kicker">正在播放</div>
                 <div className="stage-toolbar">
                   <button className="st-btn" onClick={onStop} disabled={!playing} title="停止">
                     ⏹
@@ -510,9 +752,19 @@ export default function App() {
                     />
                   </div>
                   <button
+                    className={"st-btn" + (repeat !== "off" ? " on" : "")}
+                    onClick={() =>
+                      setRepeat((r) => (r === "off" ? "all" : r === "all" ? "one" : "off"))
+                    }
+                    title={"循环: " + (repeat === "off" ? "关" : repeat === "all" ? "列表" : "单曲")}
+                    aria-label="循环模式"
+                  >
+                    ↻
+                  </button>
+                  <button
                     className={"st-btn" + (panelVisible ? " on" : "")}
                     onClick={() => setPanelVisible((v) => !v)}
-                    title="曲目面板"
+                    title="播放队列"
                   >
                     ☰
                   </button>
@@ -540,11 +792,12 @@ export default function App() {
                 lyricsOn={lyricsOn}
                 onRetryLyrics={() => void loadLyrics(playing?.no ?? 1, true)}
                 shuffle={shuffle}
-                repeat={repeat}
                 onToggleShuffle={() => setShuffle((v) => !v)}
-                onCycleRepeat={() =>
-                  setRepeat((r) => (r === "off" ? "all" : r === "all" ? "one" : "off"))
-                }
+                lyricSourceMode={lyricSourceMode}
+                onPickLyricSource={pickLyricSource}
+                onManualLyrics={() => setManualLyricsOpen(true)}
+                panelVisible={panelVisible}
+                onTogglePanel={() => setPanelVisible((v) => !v)}
               />
             </div>
           )}
@@ -559,9 +812,6 @@ export default function App() {
                 if (release?.id) void openMbRelease(release.id);
               }}
             />
-          )}
-          {!loading && disc && view === "queue" && (
-            <QueueView disc={disc} release={release} cover={cover} playing={playing} onPlay={onPlay} />
           )}
           {!loading && view === "library" && (
             <LibraryView onOpenRelease={(id) => void openMbRelease(id)} />
@@ -589,10 +839,23 @@ export default function App() {
           )}
 
           {!loading && disc && view === "info" && showSearch && (
-            <SearchPanel onSearch={onSearch} onPick={onPick} />
+            <SearchPanel
+              onSearch={onSearch}
+              onPick={onPick}
+              onClose={() => setShowSearch(false)}
+            />
           )}
           </div>
         </main>
+
+        {manualLyricsOpen && (
+          <ManualLyricsModal
+            initialTitle={playing?.title ?? ""}
+            initialArtist={curArtist}
+            onSearch={manualLyricsSearch}
+            onClose={() => setManualLyricsOpen(false)}
+          />
+        )}
 
         {disc && view === "playing" && panelVisible && (
           <TrackPanel
@@ -602,7 +865,10 @@ export default function App() {
             mediumIdx={mediumIdx}
             onPickMedium={pickMedium}
             playing={playing}
+            queue={queue}
             onPlay={onPlay}
+            onReorder={reorderQueue}
+            onPlayNext={playNextInQueue}
           />
         )}
       </div>

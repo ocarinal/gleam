@@ -39,6 +39,9 @@ export function NavSidebar({
   disc,
   discTitle,
   discYear,
+  discArtist,
+  nowTitle,
+  nowArtist,
   driveState,
   hasPlaying,
   onNav,
@@ -49,6 +52,9 @@ export function NavSidebar({
   disc: import("../api").TocInfo | null;
   discTitle: string | null;
   discYear: string | null;
+  discArtist: string | null;
+  nowTitle: string | null;
+  nowArtist: string | null;
   driveState: "disc" | "empty" | "unknown" | null;
   hasPlaying: boolean;
   onNav: (v: any) => void;
@@ -68,24 +74,37 @@ export function NavSidebar({
     <aside className="navside">
       <div className="navside-brand">
         <div className="nb-title">Gleam</div>
-        <div className="nb-sub">{hasPlaying ? "正在播放 CD" : "音乐光盘"}</div>
+        <div
+          className="nb-sub"
+          title={nowTitle ? `${nowTitle}${nowArtist ? ` - ${nowArtist}` : ""}` : undefined}
+        >
+          {nowTitle
+            ? `正在播放：${nowTitle}${nowArtist ? ` - ${nowArtist}` : ""}`
+            : hasPlaying
+            ? "正在播放"
+            : "音乐光盘"}
+        </div>
         <div className="nb-slogan">东半球最好的实体CD播放程序</div>
       </div>
 
       <nav className="navside-menu">
+        <NavItem icon="⌂" label="首页" active={view === "home"} onClick={() => onNav("home")} />
         <NavItem icon="▤" label="正在播放" active={view === "playing"} onClick={() => onNav("playing")} />
         <NavItem icon="ⓘ" label="专辑信息" active={view === "info"} onClick={() => onNav("info")} />
-        <NavItem icon="≡" label="播放队列" active={view === "queue"} onClick={() => onNav("queue")} />
         <NavItem icon="♫" label="光盘库" active={view === "library"} onClick={() => onNav("library")} />
         <NavItem icon="⚙" label="设置" active={view === "settings"} onClick={() => onNav("settings")} />
       </nav>
 
       <div className="navside-drive">
         {disc && (
-          <div className="side-meta">
+          <div className="side-meta side-meta-clear">
+            <div className="dm-now-label">当前CD</div>
             <Marquee text={discTitle ?? "音频 CD"} />
+            <div className="dm-artist" title={discArtist ?? undefined}>
+              {discArtist || "未知艺人"}
+            </div>
             <div className="dm-sub">
-              {disc.trackCount} 音歌曲 {total(disc)}
+              {disc.trackCount} 首歌曲 {total(disc)}
               {discYear ? ` · ${discYear}` : ""}
             </div>
           </div>

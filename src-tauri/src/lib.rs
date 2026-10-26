@@ -5,7 +5,7 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Mutex, OnceLock};
 
 use cd_core::{
-    cover, discid::Toc, library::Library, lrclib, mb, netease, player::Player, toc,
+    cover, discid::Toc, library::Library, lyrics, mb, meta, netease, player::Player, toc,
 };
 use serde::Serialize;
 use tauri::{Emitter, Manager};
@@ -45,8 +45,10 @@ struct LyricsResult {
     tlyric: Option<String>,
     synced: bool,
     source: String,
-    /// 网易云专辑封面 (data URL), 作为 CAA 的补充源
+    /// 兼容旧字段: 封面由封面管线负责，这里暂时为空
     cover: Option<String>,
+    bilingual: bool,
+    word_timed: bool,
 }
 
 fn cache_dir() -> PathBuf {
@@ -344,81 +346,47 @@ async fn fetch_lyrics(
     length_ms: Option<u64>,
     recording_id: Option<String>,
     force: Option<bool>,
+    source: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<LyricsResult, String> {
     let force = force.unwrap_or(false);
-    // 缓存: 同键直接返回 (连播不再重复打 API; force=true 手动重查时绕过)
-    let key = format!("{title}|{artist}|{length_ms:?}|{}", recording_id.as_deref().unwrap_or(""));
+    let source = source.unwrap_or_else(|| "auto".to_string());
+    // 缓存: 同键+同源直接返回 (force=true 手动重查时绕过)
+    let key = format!(
+        "{title}|{artist}|{length_ms:?}|{}|{source}",
+        recording_id.as_deref().unwrap_or("")
+    );
     if !force {
         if let Some(v) = state.lyric_cache.lock().unwrap().get(&key).cloned() {
             return serde_json::from_value(v).map_err(|e| format!("缓存解析失败: {e}"));
         }
     }
     let result = tauri::async_runtime::spawn_blocking(move || -> Result<LyricsResult, String> {
-        std::thread::sleep(std::time::Duration::from_millis(300)); // 节流: 连播曲线
-        let dur_ok = |d: f64| -> bool {
-            match length_ms {
-                Some(ms) => (d - ms as f64 / 1000.0).abs() <= 6.0,
-                None => true,
-            }
+        // 节流: 连播时不要瞬间打爆多个歌词源
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let best = if source == "auto" {
+            lyrics::collect(&title, &artist, length_ms, recording_id.as_deref())
+        } else {
+            lyrics::collect_one(&source, &title, &artist, length_ms, recording_id.as_deref())
         };
-        let mut cover = None;
-        let mut best: Option<(String, String, Option<String>, bool)> = None;
-
-        // 1) LRCLIB 优先 (精确题名/歌手/时长, 不会给错歌)
-        if let Ok(results) = lrclib::search(&title, &artist, length_ms) {
-            if let Some(p) = lrclib::pick(&results, &title, &artist, length_ms, recording_id.as_deref()) {
-                let mid_ok = match (recording_id.as_deref(), p.musicbrainz_recording_id.as_deref()) {
-                    (Some(a), Some(b)) => a == b,
-                    _ => false,
-                };
-                let dur_ok2 = p.duration.map(dur_ok).unwrap_or(true);
-                if mid_ok || dur_ok2 {
-                    if let Some(lrc) = p.synced_lyrics.clone().or_else(|| p.plain_lyrics.clone()) {
-                        best = Some((format!("LRCLIB · {} — {}", p.artist_name.as_deref().unwrap_or(""), p.track_name), lrc, None, p.synced_lyrics.is_some()));
-                    }
-                }
-            }
-        }
-
-        // 2) 网易云 (仅接受时长匹配的, 防错歌)
-        if best.is_none() {
-            if let Ok(songs) = netease::search(&title, &artist, length_ms) {
-                if let Some(b) = songs.first() {
-                    let bdur = b.duration.unwrap_or(0) as f64 / 1000.0;
-                    if b.duration.is_some() && dur_ok(bdur) {
-                        cover = netease::album_cover_url(b.id).ok().and_then(|u| netease_cover_data_url(Some(&u)));
-                        if let Ok(ly) = netease::fetch_lyrics(b.id) {
-                            if !ly.lrc.trim().is_empty() {
-                                let arts = b.artists.iter().map(|a| a.name.clone()).collect::<Vec<_>>().join(" / ");
-                                let synced = ly.lrc.lines().any(|l| l.trim_start().starts_with('['));
-                                best = Some((format!("网易云音乐 · {arts} — {}", b.name), ly.lrc, ly.tlyric, synced));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3) 最后兜底: 网易云无时长校验结果也拿封面 (仅当无更好来源时)
-        if cover.is_none() {
-            if let Ok(songs) = netease::search(&title, &artist, length_ms) {
-                if let Some(b) = songs.first() {
-                    let bdur = b.duration.unwrap_or(0) as f64 / 1000.0;
-                    if b.duration.is_some() && dur_ok(bdur) {
-                        cover = netease::album_cover_url(b.id).ok().and_then(|u| netease_cover_data_url(Some(&u)));
-                    }
-                }
-            }
-        }
+        let bilingual = best.as_ref().map(|c| c.bilingual()).unwrap_or(false);
+        let word_timed = best.as_ref().map(|c| c.word_timed).unwrap_or(false);
 
         // 诊断日志
-        let line = format!("{title} | {artist} | {}\n", match &best { Some((s,_,_,_)) => format!("OK: {s}"), None => "MISS".into() });
-        if let Ok(_) = std::fs::create_dir_all(cache_dir().join("logs")) {
+        let line = format!(
+            "{title} | {artist} | {}\n",
+            match &best {
+                Some(c) => format!("OK: {}", c.source),
+                None => "MISS".into(),
+            }
+        );
+        if std::fs::create_dir_all(cache_dir().join("logs")).is_ok() {
             let path = cache_dir().join("logs/lyrics.log");
             if let Ok(old) = std::fs::read_to_string(&path) {
                 let mut lines: Vec<&str> = old.lines().collect();
-                if lines.len() > 300 { lines.drain(..lines.len() - 300); }
+                if lines.len() > 300 {
+                    lines.drain(..lines.len() - 300);
+                }
                 let _ = std::fs::write(&path, lines.join("\n") + "\n" + &line);
             } else {
                 let _ = std::fs::write(&path, line);
@@ -426,8 +394,24 @@ async fn fetch_lyrics(
         }
 
         match best {
-            Some((src, lrc, tlyric, synced)) => Ok(LyricsResult { lrc, tlyric, synced, source: src, cover }),
-            None => Ok(LyricsResult { lrc: String::new(), tlyric: None, synced: false, source: "未找到歌词".into(), cover }),
+            Some(c) => Ok(LyricsResult {
+                lrc: c.lrc,
+                tlyric: c.tlyric,
+                synced: c.synced,
+                source: c.source,
+                cover: None,
+                bilingual,
+                word_timed,
+            }),
+            None => Ok(LyricsResult {
+                lrc: String::new(),
+                tlyric: None,
+                synced: false,
+                source: format!("{} · 无歌词", lyrics::source_label(Some(&source))),
+                cover: None,
+                bilingual: false,
+                word_timed: false,
+            }),
         }
     })
     .await
@@ -439,6 +423,21 @@ async fn fetch_lyrics(
     Ok(result)
 }
 
+
+/// 网易云专辑介绍 + 歌手简介 (信息页右侧)
+#[tauri::command]
+async fn fetch_album_extra(
+    album: String,
+    artist: String,
+    year: Option<String>,
+    track_count: Option<u32>,
+) -> Result<Option<meta::AlbumExtra>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(meta::fetch(&album, &artist, year.as_deref(), track_count))
+    })
+    .await
+    .map_err(|e| format!("任务失败: {e}"))?
+}
 
 /// 手动上传封面: data URL -> 保存到本地封面缓存 (之后全应用复用)
 #[tauri::command]
@@ -498,6 +497,22 @@ async fn library_set_medium(
     Ok(())
 }
 
+/// 设置碟组 (A/B/C...) / 移出分组
+#[tauri::command]
+async fn library_set_group(
+    discid: String,
+    group: Option<String>,
+    label: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .library
+        .lock()
+        .unwrap()
+        .set_group(&discid, group.as_deref(), label.as_deref());
+    Ok(())
+}
+
 /// 从本地光盘库移除
 #[tauri::command]
 async fn library_remove(
@@ -521,6 +536,8 @@ fn list_library(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Val
                 "release": v.get("release").cloned().unwrap_or_default(),
                 "savedAt": v.get("savedAt").cloned().unwrap_or_default(),
                 "medium": v.get("medium").cloned().unwrap_or(serde_json::json!(0)),
+                "group": v.get("group").cloned().unwrap_or(serde_json::Value::Null),
+                "discLabel": v.get("discLabel").cloned().unwrap_or(serde_json::Value::Null),
             })
         })
         .collect())
@@ -827,6 +844,10 @@ pub fn run() {
             lyric_cache: Mutex::new(Default::default()),
         })
         .setup(|app| {
+            // 高 DPI 屏幕: 整体 UI (元素+文字) 放大 14%, 窗口同步加大保持布局比例
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_zoom(1.15);
+            }
             forward_events(app.handle().clone());
             // 被动监听 sr 光盘插拔 (不占用设备, 不触发桥接固件合拢托盘)
             let child = std::process::Command::new("udevadm")
@@ -861,6 +882,7 @@ pub fn run() {
             open_mb_release,
             fetch_cover,
             fetch_lyrics,
+            fetch_album_extra,
             list_library,
             library_cover,
             play_track,
@@ -875,7 +897,8 @@ pub fn run() {
             list_fonts,
             library_update,
             library_remove,
-            library_set_medium
+            library_set_medium,
+            library_set_group
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

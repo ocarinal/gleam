@@ -3,11 +3,15 @@
 
 pub mod cover;
 pub mod discid;
+pub mod kugou;
 pub mod library;
 pub mod lrclib;
+pub mod lyrics;
 pub mod mb;
+pub mod meta;
 pub mod netease;
 pub mod player;
+pub mod qq;
 pub mod toc;
 
 pub const USER_AGENT: &str = "SoundDisc/0.1 (local self-use; contact: local user)";

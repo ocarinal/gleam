@@ -1,6 +1,21 @@
 import { fmtC } from "../util";
-import type { Release, TocInfo } from "../api";
+import { fetchAlbumExtra, type AlbumExtra, type Release, type TocInfo } from "../api";
 import { useEffect, useRef, useState } from "react";
+
+const SearchIcon = () => (
+  <svg
+    className="btn-ico"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.2"
+    strokeLinecap="round"
+    aria-hidden="true"
+  >
+    <circle cx="10.5" cy="10.5" r="6.5" />
+    <path d="M15.5 15.5 21 21" />
+  </svg>
+);
 
 export function InfoView({
   disc,
@@ -17,27 +32,70 @@ export function InfoView({
   onMbSubmit: () => void;
   onMbOpen: () => void;
 }) {
+  const infoArtists =
+    release?.artistCredit?.map((a) => a.name).join(" / ") || "";
+  const [extra, setExtra] = useState<AlbumExtra | null>(null);
+  const [extraLoading, setExtraLoading] = useState(false);
+
+  useEffect(() => {
+    if (!release) {
+      setExtra(null);
+      setExtraLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setExtraLoading(true);
+    setExtra(null);
+    fetchAlbumExtra(
+      release.title,
+      infoArtists,
+      release.date?.slice(0, 4) ?? null,
+      disc.trackCount
+    )
+      .then((x) => {
+        if (!cancelled) setExtra(x);
+      })
+      .catch(() => {
+        if (!cancelled) setExtra(null);
+      })
+      .finally(() => {
+        if (!cancelled) setExtraLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [release?.id, release?.title, release?.date, infoArtists, disc.trackCount]);
+
   if (!release) {
     return (
-      <div className="info-page">
-        <div className="meta-card">
-          <div className="meta-card-title">未识别专辑</div>
-          <div className="meta-card-sub">
-            DiscID: <code>{disc.discid}</code>
+      <div className="info-page info-unknown-page">
+        <section className="unknown-card">
+          <div className="unknown-orbit" aria-hidden="true">
+            <span />
           </div>
-          <div className="meta-card-actions">
-            <button className="btn" onClick={onSearch}>
-              🔎 搜索专辑
+          <div className="unknown-kicker">光盘已读取</div>
+          <div className="unknown-title">未识别这张 CD</div>
+          <div className="unknown-sub">
+            暂时没有对应的发行信息。可以手动搜索专辑，或把 DiscID 提交到 MusicBrainz。
+          </div>
+          <div className="unknown-meta">
+            <span>{disc.trackCount} 首曲目</span>
+            <span className="unknown-dot" />
+            <span className="unknown-discid">DiscID {disc.discid}</span>
+          </div>
+          <div className="unknown-actions">
+            <button className="btn unknown-search btn-with-icon" onClick={onSearch}>
+              <SearchIcon /> 搜索专辑
             </button>
             <button className="btn btn-ghost" onClick={onMbSubmit}>
               ⬆ 提交 DiscID
             </button>
           </div>
-        </div>
+        </section>
       </div>
     );
   }
-  const artists = release.artistCredit?.map((a) => a.name).join(" / ") || "";
+
   const rows: [string, string][] = [
     ["发行日期", release.date ?? "—"],
     ["国家/地区", release.country ?? "—"],
@@ -46,44 +104,105 @@ export function InfoView({
     ["DiscID", disc.discid],
     ["格式", release.media?.[0]?.format ?? "—"],
   ];
+  const artistName = extra?.artistName || infoArtists || "未知艺人";
+
   return (
     <div className="info-page">
       <div className="page-head">
         <div className="page-title2">专辑信息</div>
-        <div className="page-sub2">发行信息一览 · MusicBrainz 元数据</div>
+        <div className="page-sub2">发行信息 · MusicBrainz × 网易云音乐</div>
       </div>
-      <div className="info-hero">
-        {cover ? (
-          <img className="info-cover" src={cover} alt="" />
-        ) : (
-          <div className="info-cover info-cover-empty">♫</div>
-        )}
-        <div className="info-hero-meta">
-          <div className="info-title">{release.title}</div>
-          <div className="info-artist">{artists}</div>
-          <div className="info-sub">
-            {[release.date, release.country].filter(Boolean).join(" · ")}
-            {release.disambiguation ? ` · ${release.disambiguation}` : ""}
+
+      <div className="info-grid">
+        <div className="info-main">
+          <div className="info-hero">
+            {cover ? (
+              <img className="info-cover" src={cover} alt="" />
+            ) : (
+              <div className="info-cover info-cover-empty">♫</div>
+            )}
+            <div className="info-hero-meta">
+              <div className="info-title">{release.title}</div>
+              <div className="info-artist">{infoArtists}</div>
+              <div className="info-sub">
+                {[release.date, release.country].filter(Boolean).join(" · ")}
+                {release.disambiguation ? ` · ${release.disambiguation}` : ""}
+              </div>
+            </div>
+          </div>
+
+          <div className="info-rows">
+            {rows.map(([k, v]) => (
+              <div className="info-row" key={k}>
+                <span className="info-k">{k}</span>
+                <span className="info-v">{v}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="meta-card-actions">
+            <button className="btn btn-ghost btn-with-icon" onClick={onSearch}>
+              <SearchIcon /> 搜索专辑
+            </button>
+            <button className="btn btn-ghost" onClick={onMbOpen}>
+              ↗ MusicBrainz 打开
+            </button>
+            <button className="btn" onClick={onMbSubmit}>
+              ⬆ 提交 DiscID
+            </button>
           </div>
         </div>
-      </div>
 
-      <div className="info-rows">
-        {rows.map(([k, v]) => (
-          <div className="info-row" key={k}>
-            <span className="info-k">{k}</span>
-            <span className="info-v">{v}</span>
-          </div>
-        ))}
-      </div>
+        <aside className="info-extra">
+          <section className="info-panel">
+            <div className="info-panel-head">
+              <span>专辑介绍</span>
+              {extra?.source ? (
+                <span className="info-panel-src">{extra.source}</span>
+              ) : null}
+            </div>
+            {extraLoading ? (
+              <div className="info-skeleton" aria-label="加载中">
+                <span /><span /><span /><span />
+              </div>
+            ) : extra?.albumDescription ? (
+              <div className="info-desc">{extra.albumDescription}</div>
+            ) : (
+              <div className="info-empty">暂无专辑介绍</div>
+            )}
+          </section>
 
-      <div className="meta-card-actions">
-        <button className="btn btn-ghost" onClick={onMbOpen}>
-          ↗ MusicBrainz 打开
-        </button>
-        <button className="btn" onClick={onMbSubmit}>
-          ⬆ 提交 DiscID
-        </button>
+          <section className="info-panel artist-panel">
+            <div className="info-panel-head">
+              <span>歌手信息</span>
+              {extra?.source ? (
+                <span className="info-panel-src">{extra.source}</span>
+              ) : null}
+            </div>
+            <div className="artist-head">
+              {extra?.artistAvatar ? (
+                <img className="artist-avatar" src={extra.artistAvatar} alt="" />
+              ) : (
+                <div className="artist-avatar artist-avatar-empty">
+                  {artistName.slice(0, 1)}
+                </div>
+              )}
+              <div className="artist-head-meta">
+                <div className="artist-name">{artistName}</div>
+                <div className="artist-kicker">ARTIST</div>
+              </div>
+            </div>
+            {extraLoading ? (
+              <div className="info-skeleton" aria-label="加载中">
+                <span /><span /><span />
+              </div>
+            ) : extra?.artistBio ? (
+              <div className="info-desc artist-bio">{extra.artistBio}</div>
+            ) : (
+              <div className="info-empty">暂无歌手简介</div>
+            )}
+          </section>
+        </aside>
       </div>
     </div>
   );
@@ -177,7 +296,7 @@ function FontPicker({
         style={value ? { fontFamily: value } : undefined}
         onClick={() => setOpen((v) => !v)}
       >
-        <span>{value || "默认 (系统字体)"}</span>
+        <span>{value || "默认 (慧心)"}</span>
         <span className="fp-arrow">▾</span>
       </button>
       {open && (
@@ -189,7 +308,7 @@ function FontPicker({
               setOpen(false);
             }}
           >
-            默认 (系统字体)
+            默认 (慧心)
           </div>
           {fonts.map((f) => (
             <div

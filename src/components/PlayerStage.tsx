@@ -1,34 +1,93 @@
-import type { Progress } from "../api";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { LyricSource, Progress } from "../api";
 import type { LrcLine } from "../lrc";
 import { LyricsInline } from "./LyricsInline";
+import { PlayControlBar } from "./PlayControlBar";
 
-const fmtC = (s: number) => {
-  if (!isFinite(s) || s < 0) return "0:00";
-  const m = Math.floor(s / 60);
-  return `${String(m).padStart(2, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-};
+const LYRIC_SOURCES: { id: LyricSource; label: string }[] = [
+  { id: "auto", label: "自动（最佳匹配）" },
+  { id: "lrclib", label: "LRCLIB" },
+  { id: "netease", label: "网易云音乐" },
+  { id: "qq", label: "QQ 音乐" },
+  { id: "kugou", label: "酷狗音乐" },
+];
 
+function LyricSourceMenu({
+  x,
+  y,
+  current,
+  onPick,
+  onManual,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  current: LyricSource;
+  onPick: (s: LyricSource) => void;
+  onManual: () => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ x, y });
 
-/** 单色 SVG 图标 (描边, 避免字体缺字形) */
-const ShuffleIcon = () => (
-  <svg width="17" height="16" viewBox="0 0 24 20" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 5h2.2c1.7 0 3.2.8 4.1 2.2l5.4 8c.9 1.3 2.4 2.2 4.1 2.2H21" />
-    <path d="M3 16h2.2c1.7 0 3.2-.9 4.1-2.2" />
-    <path d="M21 5h-2.2c-1.7 0-3.2.9-4.1 2.2l-5.4 8" />
-    <polyline points="18.5 2 21.5 5 18.5 8" />
-    <polyline points="18.5 13 21.5 16 18.5 19" />
-  </svg>
-);
+  useEffect(() => {
+    const close = () => onClose();
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("pointerdown", close);
+    window.addEventListener("keydown", esc);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", close);
+      window.removeEventListener("keydown", esc);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [onClose]);
 
-const RepeatIcon = ({ one }: { one?: boolean }) => (
-  <svg width="16" height="16" viewBox="0 0 24 22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M17 2.5l3 3-3 3" />
-    <path d="M3 11V9.5A4.5 4.5 0 0 1 7.5 5H20" />
-    <path d="M7 19.5l-3-3 3-3" />
-    <path d="M21 11v1.5A4.5 4.5 0 0 1 16.5 17H4" />
-    {one ? <circle cx="12" cy="11" r="2.4" /> : null}
-  </svg>
-);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const pad = 10;
+    setPos({
+      x: Math.max(pad, Math.min(x, window.innerWidth - r.width - pad)),
+      y: Math.max(pad, Math.min(y, window.innerHeight - r.height - pad)),
+    });
+  }, [x, y]);
+
+  return createPortal(
+    <div
+      ref={ref}
+      className="lyric-source-menu"
+      style={{ left: pos.x, top: pos.y }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="lsm-head">歌词源</div>
+      {LYRIC_SOURCES.map((s) => (
+        <button
+          key={s.id}
+          className={"lsm-item" + (current === s.id ? " on" : "")}
+          onClick={() => onPick(s.id)}
+        >
+          <span>{s.label}</span>
+          <span className="lsm-check">{current === s.id ? "✓" : ""}</span>
+        </button>
+      ))}
+      <button
+        className="lsm-item lsm-manual"
+        onClick={() => {
+          onClose();
+          onManual();
+        }}
+      >
+        <span>⌕ 手动查找歌词…</span>
+      </button>
+      <div className="lsm-foot">右键歌词可随时切换</div>
+    </div>,
+    document.body
+  );
+}
 
 export function PlayerStage({
   cover,
@@ -50,9 +109,12 @@ export function PlayerStage({
   lyricsOn,
   onRetryLyrics,
   shuffle,
-  repeat,
   onToggleShuffle,
-  onCycleRepeat,
+  lyricSourceMode,
+  onPickLyricSource,
+  onManualLyrics,
+  panelVisible,
+  onTogglePanel,
 }: {
   cover: string | null;
   title: string;
@@ -73,66 +135,20 @@ export function PlayerStage({
   lyricsOn: boolean;
   onRetryLyrics: () => void;
   shuffle: boolean;
-  repeat: "off" | "all" | "one";
   onToggleShuffle: () => void;
-  onCycleRepeat: () => void;
+  lyricSourceMode: LyricSource;
+  onPickLyricSource: (s: LyricSource) => void;
+  onManualLyrics: () => void;
+  panelVisible: boolean;
+  onTogglePanel: () => void;
 }) {
-  const pct = progress && progress.duration > 0 ? (progress.time / progress.duration) * 100 : 0;
   const paused = !playing || (progress?.paused ?? true);
+  const [lyricMenu, setLyricMenu] = useState<{ x: number; y: number } | null>(null);
 
-  const progressRow = (
-    <div className="stage-progress-row">
-      <span className="sp-time">{progress ? fmtC(progress.time) : "0:00"}</span>
-      <div
-        className="pb-progress sp-bar"
-        onClick={(e) => {
-          if (!progress) return;
-          const r = e.currentTarget.getBoundingClientRect();
-          const p = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
-          onSeek(progress.start + p * progress.duration);
-        }}
-      >
-        <div className="pb-progress-fill" style={{ width: `${pct}%` }} />
-        <div className="pb-progress-knob" style={{ left: `${pct}%` }} />
-      </div>
-      <span className="sp-time">
-        {progress ? `-${fmtC(Math.max(0, progress.duration - progress.time))}` : "--:--"}
-      </span>
-    </div>
-  );
-
-  const controls = (
-    <div className="stage-mini-ctl">
-      <button
-        className={"smc" + (shuffle ? " on" : "")}
-        onClick={onToggleShuffle}
-        title="随机播放"
-      >
-        <ShuffleIcon />
-      </button>
-      <button className="smc" onClick={onPrev} disabled={!playing} title="上一首">
-        ⏮
-      </button>
-      <button
-        className="smc-play"
-        onClick={onTogglePause}
-        disabled={!canPlay}
-        title={playing ? "播放/暂停" : "播放第 1 首"}
-      >
-        {playing ? (progress?.paused ? "▶" : "⏸") : "▶"}
-      </button>
-      <button className="smc" onClick={onNext} disabled={!playing} title="下一首">
-        ⏭
-      </button>
-      <button
-        className={"smc" + (repeat !== "off" ? " on" : "")}
-        onClick={onCycleRepeat}
-        title="循环: 关 / 全部 / 单曲"
-      >
-        <RepeatIcon one={repeat === "one"} />
-      </button>
-    </div>
-  );
+  const openLyricMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setLyricMenu({ x: e.clientX, y: e.clientY });
+  };
 
   return (
     <div className={"stage" + (lyricsOnly ? " lyrics-only" : "")}>
@@ -151,6 +167,8 @@ export function PlayerStage({
               onRetry={onRetryLyrics}
               idle={playing ? undefined : `当前CD · ${title}`}
               paused={paused}
+              onContextMenu={openLyricMenu}
+              onManualSearch={onManualLyrics}
             />
           </div>
         </div>
@@ -173,14 +191,12 @@ export function PlayerStage({
                   onRetry={onRetryLyrics}
                   idle={playing ? undefined : `当前CD · ${title}`}
                   paused={paused}
+                  onContextMenu={openLyricMenu}
+                  onManualSearch={onManualLyrics}
                 />
               </div>
             )}
 
-            <div className="stage-footer">
-              {progressRow}
-              {controls}
-            </div>
           </div>
 
           <div
@@ -190,11 +206,28 @@ export function PlayerStage({
           >
             <div className="stage-cd">
               {cover ? (
-                <img key={cover} className="cdcase" src={cover} alt="" />
+                <img key={cover} className="cdcase cover-vt" src={cover} alt="" />
               ) : (
-                <div className="cdcase cdcase-empty">♫</div>
+                <div className="cdcase cdcase-empty cover-vt">♫</div>
               )}
             </div>
+          </div>
+
+          <div className="stage-dock">
+            <PlayControlBar
+              title={title}
+              playing={playing}
+              progress={progress}
+              canPlay={canPlay}
+              shuffle={shuffle}
+              panelVisible={panelVisible}
+              onPrev={onPrev}
+              onTogglePause={onTogglePause}
+              onNext={onNext}
+              onSeek={onSeek}
+              onToggleShuffle={onToggleShuffle}
+              onTogglePanel={onTogglePanel}
+            />
           </div>
         </>
       )}
@@ -203,6 +236,20 @@ export function PlayerStage({
         <button className="ly-back" onClick={onExitOnly} title="返回封面">
           ✕
         </button>
+      )}
+
+      {lyricMenu && (
+        <LyricSourceMenu
+          x={lyricMenu.x}
+          y={lyricMenu.y}
+          current={lyricSourceMode}
+          onPick={(s) => {
+            setLyricMenu(null);
+            onPickLyricSource(s);
+          }}
+          onManual={onManualLyrics}
+          onClose={() => setLyricMenu(null)}
+        />
       )}
     </div>
   );

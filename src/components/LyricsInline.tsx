@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { currentLine, type LrcLine } from "../lrc";
 
 /** 当前行结束时间：优先用下一行，间隔过长时按字数估一个合理时长 */
@@ -74,6 +74,18 @@ function KaraokeLine({
   );
 }
 
+/** 估算一行的显示宽度 (CJK 按 1, 拉丁按 0.55, 空格按 0.35) */
+function displayUnits(text: string): number {
+  let n = 0;
+  for (const ch of Array.from(text)) {
+    if (/[\u3000-\u9fff\uff00-\uffef]/.test(ch)) n += 1;
+    else if (/[A-Za-z0-9]/.test(ch)) n += 0.55;
+    else if (ch === " ") n += 0.35;
+    else n += 0.62;
+  }
+  return n;
+}
+
 /** 内嵌歌词面板 (封面左侧), 逐字点亮 + 同步滚动 + 点行跳转 */
 export function LyricsInline({
   lines,
@@ -83,6 +95,8 @@ export function LyricsInline({
   onRetry,
   idle,
   paused = false,
+  onContextMenu,
+  onManualSearch,
 }: {
   lines: LrcLine[];
   time: number;
@@ -91,13 +105,50 @@ export function LyricsInline({
   onRetry?: () => void;
   idle?: string;
   paused?: boolean;
+  onContextMenu?: (e: React.MouseEvent) => void;
+  onManualSearch?: () => void;
 }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [cur, setCur] = useState(-1);
+  const [fit, setFit] = useState(1);
+  const maxUnits = useMemo(
+    () => lines.reduce((m, l) => Math.max(m, displayUnits(l.text)), 0),
+    [lines]
+  );
 
   useEffect(() => {
     setCur(currentLine(lines, time));
   }, [time, lines]);
+
+  // 长句多时按可用宽度整体缩小字号, 避免长行反复折行显得乱
+  useEffect(() => {
+    const update = () => {
+      const el = bodyRef.current;
+      if (!el || maxUnits <= 0) {
+        setFit(1);
+        return;
+      }
+      const fs = parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue("--fs")
+      ) || 1;
+      const base = Math.max(21, Math.min(46, window.innerWidth * 0.0205)) * fs;
+      const avail = Math.max(320, el.clientWidth - 2);
+      // 允许约 1.65 行的宽度, 超出后整体收紧
+      const raw = (avail * 1.65) / (maxUnits * base);
+      setFit(Math.max(0.7, Math.min(1, raw)));
+    };
+    update();
+    window.addEventListener("resize", update);
+    let ro: ResizeObserver | undefined;
+    if (bodyRef.current && typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(update);
+      ro.observe(bodyRef.current);
+    }
+    return () => {
+      window.removeEventListener("resize", update);
+      ro?.disconnect();
+    };
+  }, [lines, maxUnits]);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -111,16 +162,27 @@ export function LyricsInline({
 
   if (lines.length === 0) {
     if (idle) {
-      return <div className="li-none li-idle">{idle}</div>;
+      return (
+        <div className="li-none li-idle" onContextMenu={onContextMenu}>
+          {idle}
+        </div>
+      );
     }
     return (
-      <div className="li-none">
+      <div className="li-none" onContextMenu={onContextMenu}>
         <div>{source || "暂无歌词"}</div>
-        {onRetry && (
-          <button className="li-retry" onClick={onRetry}>
-            ⟳ 重新查找
-          </button>
-        )}
+        <div className="li-none-actions">
+          {onRetry && (
+            <button className="li-retry" onClick={onRetry}>
+              ⟳ 重新查找
+            </button>
+          )}
+          {onManualSearch && (
+            <button className="li-retry li-manual" onClick={onManualSearch}>
+              ⌕ 手动查找
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -129,7 +191,12 @@ export function LyricsInline({
   const times = cur >= 0 ? charTimes(lines[cur], end) : [];
 
   return (
-    <div className="li" ref={bodyRef}>
+    <div
+      className={"li" + (fit < 0.995 ? " li-long" : "")}
+      ref={bodyRef}
+      style={{ ["--li-fit" as string]: String(fit) } as React.CSSProperties}
+      onContextMenu={onContextMenu}
+    >
       {source ? <div className="li-source">{source}</div> : null}
       {lines.map((l, i) => {
         const active = i === cur;

@@ -97,3 +97,39 @@ pub fn pick(
             .unwrap_or(std::cmp::Ordering::Equal)
     }).cloned()
 }
+
+/// 多源聚合用的统一候选
+pub fn candidate(
+    title: &str,
+    artist: &str,
+    length_ms: Option<u64>,
+    recording_id: Option<&str>,
+) -> Option<crate::lyrics::Candidate> {
+    let results = search(title, artist, length_ms).ok()?;
+    let p = pick(&results, title, artist, length_ms, recording_id)?;
+    let mid_ok = match (recording_id, p.musicbrainz_recording_id.as_deref()) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    };
+    if !mid_ok && !crate::lyrics::duration_ok(p.duration, length_ms, 6.0) {
+        return None;
+    }
+    let lrc = p
+        .synced_lyrics
+        .clone()
+        .or_else(|| p.plain_lyrics.clone())?;
+    if lrc.trim().is_empty() {
+        return None;
+    }
+    let source = match p.artist_name.as_deref().filter(|s| !s.trim().is_empty()) {
+        Some(a) => format!("LRCLIB · {} — {}", a, p.track_name),
+        None => format!("LRCLIB · {}", p.track_name),
+    };
+    Some(crate::lyrics::Candidate {
+        source,
+        synced: crate::lyrics::has_timestamps(&lrc),
+        word_timed: crate::lyrics::has_word_tags(&lrc),
+        lrc,
+        tlyric: None,
+    })
+}

@@ -10,3 +10,5 @@ libloading = "0.8"
 sha1 = "0.10"
 ureq = { version = "2", features = ["rustls", "json"] }
 libc = "0.2"
+base64 = "0.22"
+flate2 = "1"

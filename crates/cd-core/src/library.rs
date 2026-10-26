@@ -37,10 +37,29 @@ impl Library {
     }
 
     pub fn put(&mut self, discid: &str, release: &serde_json::Value) {
+        // 重新插入同一张碟时保留碟组/碟片标记, 否则 A/B/C 编组会丢
+        let old = self
+            .data
+            .get("discs")
+            .and_then(|d| d.get(discid))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let group = old.get("group").cloned();
+        let label = old.get("discLabel").cloned();
+        let medium = old.get("medium").cloned();
         self.data["discs"][discid] = serde_json::json!({
             "release": release,
             "savedAt": chrono_now(),
         });
+        if let Some(g) = group {
+            self.data["discs"][discid]["group"] = g;
+        }
+        if let Some(l) = label {
+            self.data["discs"][discid]["discLabel"] = l;
+        }
+        if let Some(m) = medium {
+            self.data["discs"][discid]["medium"] = m;
+        }
         self.save();
     }
 
@@ -98,6 +117,29 @@ impl Library {
     /// 记录条目对应的碟片 (A=0, B=1 ...)
     pub fn set_medium(&mut self, discid: &str, idx: u32) {
         self.data["discs"][discid]["medium"] = serde_json::json!(idx);
+        self.save();
+    }
+
+    /// 设置碟组 (A/B/C...) 与组内标签; group=None 表示移出分组
+    pub fn set_group(&mut self, discid: &str, group: Option<&str>, label: Option<&str>) {
+        if !self.data["discs"][discid].is_object() {
+            return;
+        }
+        match (group, label) {
+            (Some(g), Some(l)) => {
+                self.data["discs"][discid]["group"] = serde_json::json!(g);
+                self.data["discs"][discid]["discLabel"] = serde_json::json!(l);
+            }
+            (Some(g), None) => {
+                self.data["discs"][discid]["group"] = serde_json::json!(g);
+            }
+            _ => {
+                if let Some(obj) = self.data["discs"][discid].as_object_mut() {
+                    obj.remove("group");
+                    obj.remove("discLabel");
+                }
+            }
+        }
         self.save();
     }
 }
