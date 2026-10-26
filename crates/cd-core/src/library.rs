@@ -72,7 +72,11 @@ impl Library {
         }
         if let Some(a) = artist {
             if !a.trim().is_empty() {
-                release["artist-credit"] = serde_json::json!([{ "name": a.trim() }]);
+                // 内部 JSON 统一用 camelCase (与 mb::Release 的序列化键一致)
+                if let Some(obj) = release.as_object_mut() {
+                    obj.remove("artist-credit");
+                }
+                release["artistCredit"] = serde_json::json!([{ "name": a.trim() }]);
             }
         }
         self.save();

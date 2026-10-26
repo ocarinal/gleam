@@ -116,8 +116,9 @@ export default function App() {
 
   const loadCover = useCallback(async (r: Release) => {
     try {
-      const title =
-        r.media?.[0]?.tracks?.[0]?.title ?? r.title;
+      // 封面是专辑级资源: 用专辑名检索网易云兜底。
+      // (旧缓存里 artistCredit 可能为空，用首曲名会搜到同名的其它歌手)
+      const title = r.title || r.media?.[0]?.tracks?.[0]?.title || "";
       const artist = r.artistCredit?.map((a) => a.name).join(" / ") ?? "";
       setCover(await fetchCover(r.id, r.releaseGroup?.id ?? null, title, artist));
     } catch {

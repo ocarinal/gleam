@@ -82,7 +82,8 @@ function LibCard({
   const [a, setA] = useState("");
   const r: Release | undefined = e.release;
   const artist = r?.artistCredit?.map((x) => x.name).join(" / ") || "";
-  const first = r?.media?.[0]?.tracks?.[0]?.title ?? r?.title ?? "";
+  // 封面按专辑检索: 专辑名优先，旧缓存没有专辑名时才退回首曲名
+  const first = r?.title ?? r?.media?.[0]?.tracks?.[0]?.title ?? "";
 
   useEffect(() => {
     let alive = true;
@@ -275,7 +276,7 @@ export function LibraryView({
                 void refreshCover(
                   r.id,
                   r.releaseGroup?.id ?? null,
-                  r.media?.[0]?.tracks?.[0]?.title ?? r.title ?? "",
+                  r.title ?? r.media?.[0]?.tracks?.[0]?.title ?? "",
                   r.artistCredit?.map((a) => a.name).join(" / ") ?? ""
                 ).then(() => refresh());
               },

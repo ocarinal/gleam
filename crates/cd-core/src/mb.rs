@@ -24,6 +24,9 @@ pub struct RecordingRef {
 pub struct Track {
     pub title: String,
     pub length: Option<u64>,
+    // MusicBrainz 返回的是 `artist-credit`，而序列化给前端用 camelCase。
+    // 只写 rename_all 会把反序列化键名也当成 artistCredit，导致永远解析不到。
+    #[serde(alias = "artist-credit")]
     pub artist_credit: Option<Vec<ArtistCredit>>,
     pub recording: Option<RecordingRef>,
 }
@@ -32,6 +35,7 @@ pub struct Track {
 #[serde(rename_all = "camelCase")]
 pub struct Medium {
     pub format: Option<String>,
+    #[serde(alias = "track-count")]
     pub track_count: Option<u32>,
     pub tracks: Option<Vec<Track>>,
     pub discs: Option<Vec<Disc>>,
@@ -60,8 +64,10 @@ pub struct Release {
     pub status: Option<String>,
     pub barcode: Option<String>,
     pub disambiguation: Option<String>,
+    #[serde(alias = "artist-credit")]
     pub artist_credit: Option<Vec<ArtistCredit>>,
     pub media: Option<Vec<Medium>>,
+    #[serde(alias = "release-group")]
     pub release_group: Option<ReleaseGroupRef>,
 }
 
@@ -143,7 +149,7 @@ pub fn get_release(id: &str) -> Result<Release, String> {
     let v = mb_get(
         &format!("/release/{id}"),
         &[
-            ("inc", "media recordings artist-credits"),
+            ("inc", "media recordings artist-credits release-groups"),
             ("fmt", "json"),
         ],
     )?;

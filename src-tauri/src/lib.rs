@@ -219,18 +219,19 @@ fn resolve_cover(
 ) -> Option<String> {
     let label: String = release_id.chars().take(8).collect();
     let file_of = |p: &std::path::Path| -> Option<String> {
-        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
-        let mime = if ext == "png" {
-            "image/png"
-        } else if ext == "webp" {
-            "image/webp"
-        } else {
-            "image/jpeg"
-        };
         let bytes = std::fs::read(p).ok()?;
+        // 历史缓存里可能有被截断的文件，不能直接交给 WebView
+        if !cover::is_complete_image(&bytes) {
+            return None;
+        }
+        let mime = match cover::image_ext(&bytes)? {
+            "png" => "image/png",
+            "webp" => "image/webp",
+            _ => "image/jpeg",
+        };
         Some(format!("data:{mime};base64,{}", b64(&bytes)))
     };
-    // 1) 缓存 (最新优先)
+    // 1) 缓存 (最新优先; 截断文件已被 find_cached 跳过)
     if let Some(f) = cover::find_cached(release_id, dir) {
         if let Some(d) = file_of(&f) {
             return Some(d);
@@ -246,20 +247,16 @@ fn resolve_cover(
     if let Ok(songs) = netease::search(title, artist, None) {
         if let Some(best) = songs.first() {
             if let Ok(u) = netease::album_cover_url(best.id) {
-                if let Some(data) = netease_cover_data_url(Some(&u)) {
-                    let prefix = data.find(',').map(|i| i + 1).unwrap_or(0);
-                    let mime = if data.starts_with("data:image/png") {
-                        "image/png"
-                    } else {
-                        "image/jpeg"
+                if let Some((mime, bytes)) = netease_cover_bytes(Some(&u)) {
+                    let ext = match mime.as_str() {
+                        "image/png" => "png",
+                        "image/webp" => "webp",
+                        _ => "jpg",
                     };
-                    let ext = if mime == "image/png" { "png" } else { "jpg" };
-                    if let Some(bytes) = base64_decode(&data[prefix..]) {
-                        let _ = std::fs::create_dir_all(dir);
-                        let f = dir.join(format!("{label}-{label}.{ext}"));
-                        let _ = std::fs::write(&f, &bytes);
-                        return Some(format!("data:{mime};base64,{}", b64(&bytes)));
-                    }
+                    let _ = std::fs::create_dir_all(dir);
+                    let f = dir.join(format!("{label}-{label}.{ext}"));
+                    let _ = std::fs::write(&f, &bytes);
+                    return Some(format!("data:{mime};base64,{}", b64(&bytes)));
                 }
             }
         }
@@ -450,12 +447,14 @@ async fn save_cover(release_id: String, data_url: String) -> Result<Option<Strin
         let prefix = data_url.find(',').map(|i| i + 1).unwrap_or(0);
         let bytes = base64_decode(&data_url[prefix..]).ok_or("封面数据解码失败")?;
         // 按魔数识别格式 (不信任 data URL 声明的 mime)
-        let (mime, ext) = if bytes.len() > 8 && bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-            ("image/png", "png")
-        } else if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-            ("image/webp", "webp")
-        } else {
-            ("image/jpeg", "jpg")
+        if !cover::is_complete_image(&bytes) {
+            return Err("封面数据不完整或格式不支持".into());
+        }
+        let (mime, ext) = match cover::image_ext(&bytes) {
+            Some("png") => ("image/png", "png"),
+            Some("webp") => ("image/webp", "webp"),
+            Some(_) => ("image/jpeg", "jpg"),
+            None => return Err("不支持的封面格式".into()),
         };
         let dir = cache_dir().join("covers");
         std::fs::create_dir_all(&dir).map_err(|e| format!("创建封面目录失败: {e}"))?;
@@ -539,17 +538,17 @@ async fn library_cover(
         let dir = cache_dir().join("covers");
         if let Some(f) = cover::find_cached(&release_id, &dir) {
             if let Ok(bytes) = std::fs::read(&f) {
-                let mime = if bytes.len() > 8 && bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-                    "image/png"
-                } else if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
-                    "image/webp"
-                } else {
-                    "image/jpeg"
-                };
-                return Ok(Some(format!("data:{mime};base64,{}", b64(&bytes))));
+                if cover::is_complete_image(&bytes) {
+                    let mime = match cover::image_ext(&bytes).unwrap_or("jpg") {
+                        "png" => "image/png",
+                        "webp" => "image/webp",
+                        _ => "image/jpeg",
+                    };
+                    return Ok(Some(format!("data:{mime};base64,{}", b64(&bytes))));
+                }
             }
         }
-        // 2) 网易云: 用首曲搜索拿专辑封面
+        // 2) 网易云: 用专辑名 + 歌手搜索拿专辑封面
         if let Ok(songs) = netease::search(&title, &artist, None) {
             if let Some(best) = songs.first() {
                 if let Ok(u) = netease::album_cover_url(best.id) {
@@ -565,31 +564,39 @@ async fn library_cover(
 
 // ---------- 播放器 (集成控制, 无独立窗口) ----------
 
-/// 网易云专辑封面 picUrl -> data URL
-fn netease_cover_data_url(pic_url: Option<&str>) -> Option<String> {
-    let url = pic_url?.to_string();
+/// 网易云专辑封面 picUrl -> (mime, bytes)
+fn netease_cover_bytes(pic_url: Option<&str>) -> Option<(String, Vec<u8>)> {
+    let url = pic_url?;
     if !url.starts_with("http") {
         return None;
     }
-    let resp = ureq::get(&url)
-        .set("User-Agent", "Mozilla/5.0")
-        .timeout(std::time::Duration::from_secs(12))
-        .call()
-        .ok()?;
-    let mut buf = Vec::new();
-    use std::io::Read;
-    resp.into_reader().take(3_000_000).read_to_end(&mut buf).ok()?;
-    if buf.len() < 100 {
-        return None;
-    }
-    let mime = if buf.starts_with(b"\x89PNG\r\n\x1a\n") {
-        "image/png"
-    } else if buf.starts_with(b"\xff\xd8") {
-        "image/jpeg"
+    // 网易云原图可能非常大 (甚至把 .jpg 地址返回 PNG)；限到 800px 再下载，
+    // 既避免 3MB 级 data URL，也绕开历史上的截断问题。
+    let original = url;
+    let url = if url.contains("?param=") {
+        url.to_string()
+    } else if url.contains('?') {
+        format!("{url}&param=800y800")
     } else {
-        "image/jpeg"
+        format!("{url}?param=800y800")
     };
-    Some(format!("data:{mime};base64,{}", b64(&buf)))
+    // 复用统一下载器: 12MB 上限 + 完整性校验
+    let bytes = cover::download_image(&url, std::time::Duration::from_secs(20))
+        // 少数地址不接受 param 参数时退回原图 (仍有 12MB/完整性保护)
+        .or_else(|_| cover::download_image(original, std::time::Duration::from_secs(20)))
+        .ok()?;
+    let mime = match cover::image_ext(&bytes)? {
+        "png" => "image/png",
+        "webp" => "image/webp",
+        _ => "image/jpeg",
+    };
+    Some((mime.to_string(), bytes))
+}
+
+/// 网易云专辑封面 picUrl -> data URL
+fn netease_cover_data_url(pic_url: Option<&str>) -> Option<String> {
+    let (mime, bytes) = netease_cover_bytes(pic_url)?;
+    Some(format!("data:{mime};base64,{}", b64(&bytes)))
 }
 
 #[tauri::command]
