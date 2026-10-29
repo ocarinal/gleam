@@ -24,6 +24,7 @@ import {
   saveCover,
   searchReleases,
   type IdentifyProgress as IdentifyProgressData,
+  type LibraryEntry,
   type LyricsResult,
   type LyricSource,
   type Progress,
@@ -31,6 +32,7 @@ import {
   type TocInfo,
 } from "./api";
 import { parseLrc, type LrcLine } from "./lrc";
+import { coverAccentColor, hexToRgbTriplet } from "./coverColor";
 import { NavSidebar } from "./components/NavSidebar";
 import { HomeView } from "./components/HomeView";
 import { PlayerStage } from "./components/PlayerStage";
@@ -40,6 +42,7 @@ import { LibraryView } from "./components/LibraryView";
 import { SearchPanel } from "./components/SearchPanel";
 import { ManualLyricsModal } from "./components/ManualLyricsModal";
 import { IdentifyProgress } from "./components/IdentifyProgress";
+import { LibraryDetail, type CoverRect } from "./components/LibraryDetail";
 
 type View = "home" | "playing" | "tracks" | "info" | "library" | "settings";
 
@@ -124,20 +127,97 @@ function loadFavs(): Set<string> {
   }
 }
 
+const ico = {
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.8,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+};
+
+function StopIcon() {
+  return (
+    <svg {...ico}>
+      <rect x="6" y="6" width="12" height="12" rx="2.2" />
+    </svg>
+  );
+}
+function VolumeIcon() {
+  return (
+    <svg {...ico}>
+      <path d="M4 9.2h3.2L12 5.8v12.4l-4.8-3.4H4z" />
+      <path d="M15.2 9a4.2 4.2 0 0 1 0 6" />
+      <path d="M17.8 6.6a8 8 0 0 1 0 10.8" />
+    </svg>
+  );
+}
+function RepeatIcon() {
+  return (
+    <svg {...ico}>
+      <path d="M4 9.5A5.5 5.5 0 0 1 9.5 4H19" />
+      <path d="m16.5 1.8 2.4 2.2-2.4 2.2" />
+      <path d="M20 14.5A5.5 5.5 0 0 1 14.5 20H5" />
+      <path d="m7.5 22.2-2.4-2.2 2.4-2.2" />
+    </svg>
+  );
+}
+function RepeatOffIcon() {
+  return (
+    <svg {...ico}>
+      <path d="M4 9.5A5.5 5.5 0 0 1 9.5 4H19" />
+      <path d="m16.5 1.8 2.4 2.2-2.4 2.2" />
+      <path d="M20 14.5A5.5 5.5 0 0 1 14.5 20H5" />
+      <path d="m7.5 22.2-2.4-2.2 2.4-2.2" />
+      <path d="m4 4 16 16" />
+    </svg>
+  );
+}
+
+function ShuffleIcon() {
+  return (
+    <svg {...ico}>
+      <path d="M4 7h3c4 0 5 10 9 10h4" />
+      <path d="M4 17h3c4 0 5-10 9-10h4" />
+      <path d="m17.5 4.5 3 2.5-3 2.5" />
+      <path d="m17.5 14.5 3 2.5-3 2.5" />
+    </svg>
+  );
+}
+
+function QueueIcon() {
+  return (
+    <svg {...ico}>
+      <path d="M4 7h16M4 12h16M4 17h16" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>("home");
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try {
+      return localStorage.getItem("sd-sidebar") !== "closed";
+    } catch {
+      return true;
+    }
+  });
+  const [sidePhase, setSidePhase] = useState<"open" | "visible" | "hidden">(
+    "open"
+  );
+  const sideTimers = useRef<number[]>([]);
   const [disc, setDisc] = useState<TocInfo | null>(null);
   const [realRelease, setRealRelease] = useState<Release | null>(null);
   const [mediumIdx, setMediumIdx] = useState<number | null>(null);
   const [cover, setCover] = useState<string | null>(null);
   const [showSearch, setShowSearch] = useState(false);
-  const [lyricsOn, setLyricsOn] = useState(true);
   const [lyricsOnly, setLyricsOnly] = useState(false);
   const [lrcLines, setLrcLines] = useState<LrcLine[]>([]);
   const [lrcSource, setLrcSource] = useState("");
   const [lyricSourceMode, setLyricSourceMode] = useState<LyricSource>(readLyricSource);
   const [manualLyricsOpen, setManualLyricsOpen] = useState(false);
+  const [coverDetail, setCoverDetail] = useState<{ origin?: CoverRect } | null>(null);
   const [playing, setPlaying] = useState<{ no: number; title: string } | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [status, setStatus] = useState("");
@@ -145,17 +225,28 @@ export default function App() {
   const [identifyHint, setIdentifyHint] = useState("");
   const [retryingIdentify, setRetryingIdentify] = useState(false);
   const [volume, setVolume] = useState(80);
+  const lastVolumeRef = useRef(80);
+  const keyActions = useRef<Record<string, any>>({});
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState<"off" | "all" | "one">("off");
-  const [panelVisible, setPanelVisible] = useState(false);
+  const [panelMounted, setPanelMounted] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const panelTimer = useRef<number | null>(null);
+  const [topChrome, setTopChrome] = useState(true);
+  const [bottomChrome, setBottomChrome] = useState(true);
+  const topChromeTimer = useRef<number | null>(null);
+  const bottomChromeTimer = useRef<number | null>(null);
   const [queue, setQueue] = useState<number[]>([]);
   const [driveState, setDriveState] = useState<"disc" | "empty" | "unknown" | null>(null);
   const [favs, setFavs] = useState<Set<string>>(loadFavs);
+  const [coverAccent, setCoverAccent] = useState("#4cc2ff");
   const [settings, setSettings] = useState<any>(() => {
     try {
-      return JSON.parse(localStorage.getItem("sd-settings") ?? "{}");
+      const parsed = JSON.parse(localStorage.getItem("sd-settings") ?? "{}");
+      if (!parsed.accent) parsed.accent = "cover";
+      return parsed;
     } catch {
-      return {};
+      return { accent: "cover" };
     }
   });
   useEffect(() => {
@@ -163,12 +254,35 @@ export default function App() {
     // 字号: 仅放大文字 (UI 尺寸不变), 通过 --fs 变量作用于文本
     const fs = settings.font === "lg" ? 1.14 : settings.font === "xl" ? 1.28 : 1;
     document.documentElement.style.setProperty("--fs", String(fs));
-    // 强调色 + 背景动效开关
-    document.documentElement.style.setProperty("--accent", settings.accent || "#4cc2ff");
+    // 强调色: 固定色 / 跟随封面
+    const accent =
+      (settings.accent ?? "cover") === "cover"
+        ? coverAccent
+        : settings.accent;
+    document.documentElement.style.setProperty("--accent", accent);
+    document.documentElement.style.setProperty(
+      "--accent-rgb",
+      hexToRgbTriplet(accent)
+    );
     document.body.classList.toggle("no-amb", settings.ambient === false);
     // 应用字体 (空 = 系统默认)
     document.body.style.fontFamily = settings.fontFamily || "";
-  }, [settings]);
+  }, [settings, coverAccent]);
+
+  useEffect(() => {
+    if ((settings.accent ?? "cover") !== "cover") return;
+    let alive = true;
+    if (!cover) {
+      setCoverAccent("#4cc2ff");
+      return;
+    }
+    coverAccentColor(cover)
+      .then((c) => alive && setCoverAccent(c))
+      .catch(() => alive && setCoverAccent("#4cc2ff"));
+    return () => {
+      alive = false;
+    };
+  }, [settings.accent, cover]);
   const upSettings = (patch: any) => setSettings((s: any) => ({ ...s, ...patch }));
   const autoNextRef = useRef(true);
   autoNextRef.current = settings.autoNext !== false;
@@ -260,6 +374,45 @@ export default function App() {
       disc ? Array.from({ length: disc.trackCount }, (_, i) => i + 1) : []
     );
   }, [disc?.discid, disc?.trackCount]);
+
+  const clearSideTimers = useCallback(() => {
+    sideTimers.current.forEach((t) => window.clearTimeout(t));
+    sideTimers.current = [];
+  }, []);
+
+  const startSideFade = useCallback(() => {
+    clearSideTimers();
+    setSidePhase("visible");
+    // 收起后保持 5 秒, 随后直接淡出隐藏; 靠近左侧时再显示
+    sideTimers.current.push(
+      window.setTimeout(() => setSidePhase("hidden"), 5000)
+    );
+  }, [clearSideTimers]);
+
+  const revealSidebar = useCallback(() => {
+    if (sidebarOpen) return;
+    clearSideTimers();
+    setSidePhase("visible");
+  }, [sidebarOpen, clearSideTimers]);
+
+  const leaveSidebar = useCallback(() => {
+    if (!sidebarOpen) startSideFade();
+  }, [sidebarOpen, startSideFade]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("sd-sidebar", sidebarOpen ? "open" : "closed");
+    } catch {
+      /* ignore */
+    }
+    clearSideTimers();
+    if (sidebarOpen) {
+      setSidePhase("open");
+    } else {
+      startSideFade();
+    }
+    return clearSideTimers;
+  }, [sidebarOpen, clearSideTimers, startSideFade]);
 
   useEffect(() => {
     const un = onIdentifyProgress((p) => {
@@ -730,9 +883,205 @@ export default function App() {
   };
 
   const onVolume = (v: number) => {
+    if (v > 0) lastVolumeRef.current = v;
     setVolume(v);
     void playerVolume(v).catch(() => {});
   };
+
+  const openPanel = useCallback(() => {
+    if (panelTimer.current) window.clearTimeout(panelTimer.current);
+    setPanelMounted(true);
+    panelTimer.current = window.setTimeout(() => {
+      setPanelOpen(true);
+      panelTimer.current = null;
+    }, 20);
+  }, []);
+
+  const closePanel = useCallback(() => {
+    setPanelOpen(false);
+    if (panelTimer.current) window.clearTimeout(panelTimer.current);
+    panelTimer.current = window.setTimeout(() => {
+      setPanelMounted(false);
+      panelTimer.current = null;
+    }, 360);
+  }, []);
+
+  const togglePanel = useCallback(() => {
+    if (panelMounted) closePanel();
+    else openPanel();
+  }, [panelMounted, closePanel, openPanel]);
+
+  useEffect(
+    () => () => {
+      if (panelTimer.current) window.clearTimeout(panelTimer.current);
+    },
+    []
+  );
+
+  const cyclePlayMode = useCallback(() => {
+    if (shuffle) {
+      setShuffle(false);
+      setRepeat("off");
+    } else if (repeat === "one") {
+      setRepeat("all");
+    } else if (repeat === "all") {
+      setRepeat("off");
+      setShuffle(true);
+    } else {
+      setRepeat("one");
+    }
+  }, [shuffle, repeat]);
+
+  keyActions.current = {
+    cyclePlayMode,
+    onTogglePause,
+    onSeek,
+    onPrev,
+    onNext,
+    onStop,
+    onVolume,
+    setShuffle,
+    setRepeat,
+    togglePanel,
+    view,
+    progress,
+    volume,
+    shuffle,
+    repeat,
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "input, textarea, select, [contenteditable='true'], [contenteditable='']"
+        )
+      ) {
+        return;
+      }
+      const a = keyActions.current;
+      const k = e.key;
+      const code = e.code;
+
+      // 媒体键优先, 即使打开了弹窗也允许控制播放
+      const media = k || code;
+      if (media === "MediaPlayPause" || media === "MediaPlay" || media === "MediaPause") {
+        e.preventDefault();
+        void a.onTogglePause();
+        return;
+      }
+      if (media === "MediaTrackNext") {
+        e.preventDefault();
+        a.onNext();
+        return;
+      }
+      if (media === "MediaTrackPrevious") {
+        e.preventDefault();
+        a.onPrev();
+        return;
+      }
+      if (media === "MediaStop") {
+        e.preventDefault();
+        a.onStop();
+        return;
+      }
+
+      // 弹窗/菜单打开时不抢键
+      if (
+        document.querySelector(
+          ".search-modal, .manual-modal, .group-modal, .lib-detail-overlay, .ctx-menu, .lyric-source-menu"
+        )
+      ) {
+        return;
+      }
+
+      if (code === "Space" || k === " ") {
+        if (e.repeat) return;
+        e.preventDefault();
+        void a.onTogglePause();
+        return;
+      }
+
+      // Ctrl/Cmd + 左右: 上一首 / 下一首 (全局)
+      if ((e.ctrlKey || e.metaKey) && (k === "ArrowRight" || k === "ArrowLeft")) {
+        e.preventDefault();
+        if (k === "ArrowRight") a.onNext();
+        else a.onPrev();
+        return;
+      }
+
+      // 以下只在正在播放页生效
+      if (a.view !== "playing") return;
+
+      if (k === "ArrowRight" || k === "ArrowLeft") {
+        const p = a.progress;
+        if (!p) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 5;
+        const nt = Math.max(
+          0,
+          Math.min(p.duration || 0, p.time + (k === "ArrowRight" ? step : -step))
+        );
+        void a.onSeek(p.start + nt);
+        return;
+      }
+
+      if (k === "ArrowUp" || k === "ArrowDown") {
+        e.preventDefault();
+        const next = Math.max(
+          0,
+          Math.min(100, a.volume + (k === "ArrowUp" ? 5 : -5))
+        );
+        a.volume = next;
+        a.onVolume(next);
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = k.toLowerCase();
+      if (key === "m") {
+        e.preventDefault();
+        if (a.volume > 0) {
+          lastVolumeRef.current = a.volume;
+          a.volume = 0;
+          a.onVolume(0);
+        } else {
+          const v = lastVolumeRef.current || 80;
+          a.volume = v;
+          a.onVolume(v);
+        }
+        return;
+      }
+      if (key === "s") {
+        e.preventDefault();
+        a.setShuffle((v: boolean) => !v);
+        return;
+      }
+      if (key === "r") {
+        e.preventDefault();
+        a.cyclePlayMode();
+        return;
+      }
+      if (key === "q") {
+        e.preventDefault();
+        a.togglePanel();
+        return;
+      }
+      if (key === "n") {
+        e.preventDefault();
+        a.onNext();
+        return;
+      }
+      if (key === "p") {
+        e.preventDefault();
+        a.onPrev();
+        return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const favKey = playing ? `${disc?.discid ?? ""}:${playing.no}` : "";
   const isFav = favs.has(favKey);
@@ -760,8 +1109,68 @@ export default function App() {
     playing?.title ?? release?.title ?? (disc ? "点击曲目开始播放" : "");
   const curArtist = artists(release);
 
+  // WebKit 连续快速切页时可能残留旧的合成层; 切页后强制失效侧栏图层
+  useEffect(() => {
+    const el = document.querySelector(".navside") as HTMLElement | null;
+    if (!el) return;
+    el.style.transform = "translateZ(0)";
+    const id = requestAnimationFrame(() => {
+      el.style.transform = "";
+    });
+    return () => {
+      cancelAnimationFrame(id);
+      el.style.transform = "";
+    };
+  }, [view]);
+
+  const clearChromeTimers = useCallback(() => {
+    if (topChromeTimer.current) {
+      window.clearTimeout(topChromeTimer.current);
+      topChromeTimer.current = null;
+    }
+    if (bottomChromeTimer.current) {
+      window.clearTimeout(bottomChromeTimer.current);
+      bottomChromeTimer.current = null;
+    }
+  }, []);
+
+  const showTopChrome = useCallback(() => {
+    setTopChrome(true);
+    if (topChromeTimer.current) window.clearTimeout(topChromeTimer.current);
+    topChromeTimer.current = window.setTimeout(() => {
+      setTopChrome(false);
+      topChromeTimer.current = null;
+    }, 5000);
+  }, []);
+
+  const showBottomChrome = useCallback(() => {
+    setBottomChrome(true);
+    if (bottomChromeTimer.current)
+      window.clearTimeout(bottomChromeTimer.current);
+    bottomChromeTimer.current = window.setTimeout(() => {
+      setBottomChrome(false);
+      bottomChromeTimer.current = null;
+    }, 5000);
+  }, []);
+
+  useEffect(() => {
+    if (view !== "playing") {
+      clearChromeTimers();
+      return;
+    }
+    showTopChrome();
+    showBottomChrome();
+    return clearChromeTimers;
+  }, [view, showTopChrome, showBottomChrome, clearChromeTimers]);
+
   return (
-    <div className="app">
+    <div
+      className={
+        "app" +
+        (sidebarOpen ? "" : " sb-collapsed") +
+        (!sidebarOpen ? ` sb-phase-${sidePhase}` : "")
+      }
+    >
       <div
         className="app-body"
         style={{ ["--amb" as string]: cover ? `url(${cover})` : "none" }}
@@ -771,7 +1180,19 @@ export default function App() {
           style={{ backgroundImage: cover ? `url(${cover})` : "none" }}
         />
         <div className="amb-sweep" />
+        {!sidebarOpen && sidePhase === "hidden" && (
+          <div
+            className="sidebar-hover-zone"
+            onMouseEnter={revealSidebar}
+          />
+        )}
         <NavSidebar
+          key={view}
+          collapsed={!sidebarOpen}
+          onExpand={() => setSidebarOpen(true)}
+          onCollapse={() => setSidebarOpen(false)}
+          onHoverEnter={revealSidebar}
+          onHoverLeave={leaveSidebar}
           view={view}
           device={disc?.device ?? null}
           disc={disc}
@@ -813,22 +1234,26 @@ export default function App() {
           )}
 
           {!loading && disc && view === "playing" && (
-            <div className="playing-wrap">
-              <div className="playing-head-row">
+            <div
+              className="playing-wrap"
+              onMouseMove={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                const y = e.clientY - r.top;
+                if (y <= 88) {
+                  showTopChrome();
+                } else if (y >= r.height - 120) {
+                  showBottomChrome();
+                }
+              }}
+            >
+              <div
+                className={
+                  "playing-head-row" + (topChrome ? "" : " chrome-hidden")
+                }
+              >
                 <div className="stage-toolbar">
-                  <button className="st-btn" onClick={onStop} disabled={!playing} title="停止">
-                    ⏹
-                  </button>
-                  <button
-                    className={"st-btn" + (lyricsOn ? " on" : "")}
-                    onClick={() => setLyricsOn((v) => !v)}
-                    disabled={lyricsOnly}
-                    title={lyricsOnly ? "歌词模式中 · 点击空白处或 ✕ 返回" : "歌词开关"}
-                  >
-                    ♪
-                  </button>
                   <div className="st-vol">
-                    <span>🔊</span>
+                    <span className="st-vol-ico"><VolumeIcon /></span>
                     <input
                       type="range"
                       min={0}
@@ -838,23 +1263,46 @@ export default function App() {
                       className="vol-slider"
                     />
                   </div>
-                  <button
-                    className={"st-btn" + (repeat !== "off" ? " on" : "")}
-                    onClick={() =>
-                      setRepeat((r) => (r === "off" ? "all" : r === "all" ? "one" : "off"))
-                    }
-                    title={"循环: " + (repeat === "off" ? "关" : repeat === "all" ? "列表" : "单曲")}
-                    aria-label="循环模式"
-                  >
-                    ↻
-                  </button>
-                  <button
-                    className={"st-btn" + (panelVisible ? " on" : "")}
-                    onClick={() => setPanelVisible((v) => !v)}
-                    title="播放队列"
-                  >
-                    ☰
-                  </button>
+                  <div className="st-actions">
+                    <button className="st-btn" onClick={onStop} disabled={!playing} title="停止">
+                      <StopIcon />
+                    </button>
+                    <button
+                      className={"st-btn" + (repeat !== "off" || shuffle ? " on" : "")}
+                      onClick={cyclePlayMode}
+                      title={
+                        "循环模式: " +
+                        (shuffle
+                          ? "随机播放"
+                          : repeat === "one"
+                          ? "单曲循环"
+                          : repeat === "all"
+                          ? "列表循环"
+                          : "关闭")
+                      }
+                      aria-label="循环模式"
+                    >
+                      {shuffle ? (
+                        <ShuffleIcon />
+                      ) : repeat === "one" ? (
+                        <span className="st-repeat-one">
+                          <RepeatIcon />
+                          <b>1</b>
+                        </span>
+                      ) : repeat === "all" ? (
+                        <RepeatIcon />
+                      ) : (
+                        <RepeatOffIcon />
+                      )}
+                    </button>
+                    <button
+                      className={"st-btn" + (panelOpen ? " on" : "")}
+                      onClick={togglePanel}
+                      title="播放队列"
+                    >
+                      <QueueIcon />
+                    </button>
+                  </div>
                 </div>
               </div>
               <PlayerStage
@@ -872,19 +1320,15 @@ export default function App() {
                 onNext={onNext}
                 onSeek={(s) => void onSeek(s)}
                 canPlay={!!disc}
-                onCoverClick={() => {
-                  if (lrcLines.length > 0) setLyricsOnly((v) => !v);
-                }}
+                onCoverClick={(origin) => setCoverDetail({ origin })}
                 onExitOnly={() => setLyricsOnly(false)}
-                lyricsOn={lyricsOn}
                 onRetryLyrics={() => void loadLyrics(playing?.no ?? 1, true)}
-                shuffle={shuffle}
-                onToggleShuffle={() => setShuffle((v) => !v)}
                 lyricSourceMode={lyricSourceMode}
                 onPickLyricSource={pickLyricSource}
                 onManualLyrics={() => setManualLyricsOpen(true)}
-                panelVisible={panelVisible}
-                onTogglePanel={() => setPanelVisible((v) => !v)}
+                panelVisible={panelOpen}
+                chromeVisible={bottomChrome}
+                onTogglePanel={togglePanel}
               />
             </div>
           )}
@@ -940,6 +1384,34 @@ export default function App() {
 
         {identify && <IdentifyProgress status={identify} />}
 
+        {coverDetail && disc && (realRelease ?? release) && (
+          <LibraryDetail
+            mode="playback"
+            members={[
+              {
+                discId: disc.discid,
+                release: (realRelease ?? release)!,
+                savedAt: "",
+                medium: mediumIdx ?? 0,
+                group: null,
+                discLabel: null,
+              } satisfies LibraryEntry,
+            ]}
+            labels={[]}
+            initialIndex={0}
+            origin={coverDetail.origin}
+            initialCover={cover}
+            onClose={() => setCoverDetail(null)}
+            onPlayTrack={(no) => {
+              setCoverDetail(null);
+              void onPlay(no);
+            }}
+            onStream={() => {}}
+            onStreamTrack={() => {}}
+            onOpenRelease={() => {}}
+          />
+        )}
+
         {manualLyricsOpen && (
           <ManualLyricsModal
             initialTitle={playing?.title ?? ""}
@@ -949,8 +1421,11 @@ export default function App() {
           />
         )}
 
-        {disc && view === "playing" && panelVisible && (
+        {disc && view === "playing" && panelMounted && (
           <TrackPanel
+            open={panelOpen}
+            onClose={closePanel}
+            cover={cover}
             disc={disc}
             release={release}
             realMediaCount={realRelease?.media?.length ?? 0}

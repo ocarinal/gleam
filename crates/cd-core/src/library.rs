@@ -47,6 +47,8 @@ impl Library {
         let group = old.get("group").cloned();
         let label = old.get("discLabel").cloned();
         let medium = old.get("medium").cloned();
+        // 专辑介绍/歌手简介属于这张碟的缓存, 重新插入同一张碟时保留
+        let extra = old.get("albumExtra").cloned();
         self.data["discs"][discid] = serde_json::json!({
             "release": release,
             "savedAt": chrono_now(),
@@ -59,6 +61,12 @@ impl Library {
         }
         if let Some(m) = medium {
             self.data["discs"][discid]["medium"] = m;
+        }
+        if let Some(e) = extra {
+            self.data["discs"][discid]["albumExtra"] = e;
+            if let Some(v) = old.get("albumExtraVersion") {
+                self.data["discs"][discid]["albumExtraVersion"] = v.clone();
+            }
         }
         self.save();
     }
@@ -98,6 +106,31 @@ impl Library {
                 release["artistCredit"] = serde_json::json!([{ "name": a.trim() }]);
             }
         }
+        self.save();
+    }
+
+    /// 读取已缓存的专辑介绍 / 歌手简介
+    pub fn album_extra(&self, discid: &str) -> Option<serde_json::Value> {
+        let entry = self.data.get("discs")?.get(discid)?;
+        // v2: 区分专辑/歌手来源; 旧缓存没有版本号, 忽略一次并重新加载
+        if entry.get("albumExtraVersion").and_then(|v| v.as_u64())? < 2 {
+            return None;
+        }
+        entry.get("albumExtra").cloned()
+    }
+
+    /// 成功加载后写入条目; 条目不存在时忽略 (只缓存光盘库里的碟)
+    pub fn set_album_extra(&mut self, discid: &str, extra: &serde_json::Value) {
+        if self
+            .data
+            .get("discs")
+            .and_then(|d| d.get(discid))
+            .is_none()
+        {
+            return;
+        }
+        self.data["discs"][discid]["albumExtra"] = extra.clone();
+        self.data["discs"][discid]["albumExtraVersion"] = serde_json::json!(2);
         self.save();
     }
 

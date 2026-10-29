@@ -14,7 +14,12 @@ pub struct AlbumExtra {
     pub artist_name: Option<String>,
     pub artist_bio: Option<String>,
     pub artist_avatar: Option<String>,
+    /// 合并来源, 兼容旧 UI
     pub source: Option<String>,
+    /// 专辑介绍实际来源
+    pub album_source: Option<String>,
+    /// 歌手简介实际来源
+    pub artist_source: Option<String>,
 }
 
 fn get_json(url: &str) -> Result<Value, String> {
@@ -121,7 +126,7 @@ struct AlbumHit {
 
 fn album_hits(album: &str, artist: &str) -> Vec<AlbumHit> {
     let q = format!("{album} {artist}");
-    let url = format!("{API}/search/get/web?s={}&type=10&limit=12&offset=0", enc(&q));
+    let url = format!("{API}/search/get?s={}&type=10&limit=12&offset=0", enc(&q));
     let Ok(v) = get_json(&url) else {
         return Vec::new();
     };
@@ -173,7 +178,7 @@ fn album_hits(album: &str, artist: &str) -> Vec<AlbumHit> {
 }
 
 fn artist_search(artist: &str) -> Option<(u64, String)> {
-    let url = format!("{API}/search/get/web?s={}&type=100&limit=6&offset=0", enc(artist));
+    let url = format!("{API}/search/get?s={}&type=100&limit=6&offset=0", enc(artist));
     let v = get_json(&url).ok()?;
     let items = v
         .get("result")
@@ -346,6 +351,7 @@ pub fn fetch(
     let mut artist_bio = None;
     let mut artist_avatar = None;
     let mut artist_id = None;
+    let mut artist_source: Option<&str> = None;
 
     if let Some(h) = best {
         if let Some((desc, _company)) = album_detail(h.id) {
@@ -372,6 +378,9 @@ pub fn fetch(
             }
             artist_bio = bio;
             artist_avatar = avatar;
+            if artist_bio.is_some() || artist_avatar.is_some() {
+                artist_source = Some("网易云音乐");
+            }
         }
     }
     // 专辑接口没给歌手 id 时, 直接按名字搜歌手
@@ -383,6 +392,9 @@ pub fn fetch(
             if let Some((_, bio, avatar)) = artist_detail(id) {
                 artist_bio = bio;
                 artist_avatar = avatar;
+                if artist_bio.is_some() || artist_avatar.is_some() {
+                    artist_source = Some("网易云音乐");
+                }
             }
         }
     }
@@ -407,5 +419,7 @@ pub fn fetch(
         artist_bio,
         artist_avatar,
         source: Some(source),
+        album_source: desc_source.map(str::to_string),
+        artist_source: artist_source.map(str::to_string),
     })
 }

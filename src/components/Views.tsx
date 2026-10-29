@@ -56,7 +56,8 @@ export function InfoView({
       release.title,
       infoArtists,
       release.date?.slice(0, 4) ?? null,
-      disc.trackCount
+      disc.trackCount,
+      disc.discid
     )
       .then((x) => {
         if (!cancelled) setExtra(x);
@@ -173,8 +174,8 @@ export function InfoView({
           <section className="info-panel">
             <div className="info-panel-head">
               <span>专辑介绍</span>
-              {extra?.source ? (
-                <span className="info-panel-src">{extra.source}</span>
+              {extra?.albumDescription && extra?.albumSource ? (
+                <span className="info-panel-src">{extra.albumSource}</span>
               ) : null}
             </div>
             {extraLoading ? (
@@ -191,8 +192,9 @@ export function InfoView({
           <section className="info-panel artist-panel">
             <div className="info-panel-head">
               <span>歌手信息</span>
-              {extra?.source ? (
-                <span className="info-panel-src">{extra.source}</span>
+              {extra?.artistSource &&
+              (extra.artistBio || extra.artistAvatar) ? (
+                <span className="info-panel-src">{extra.artistSource}</span>
               ) : null}
             </div>
             <div className="artist-head">
@@ -439,11 +441,17 @@ export function SettingsView({
             {["#4cc2ff", "#8b5cf6", "#34d8bd", "#ff6b9d", "#ffb84c"].map((c) => (
               <button
                 key={c}
-                className={"swatch" + ((settings.accent ?? "#4cc2ff") === c ? " on" : "")}
+                className={"swatch" + ((settings.accent ?? "cover") === c ? " on" : "")}
                 style={{ background: c }}
                 onClick={() => upSettings({ accent: c })}
               />
             ))}
+            <button
+              className={"swatch swatch-cover" + ((settings.accent ?? "cover") === "cover" ? " on" : "")}
+              title="跟随封面颜色"
+              aria-label="跟随封面颜色"
+              onClick={() => upSettings({ accent: "cover" })}
+            />
           </div>
         </div>
         <div className="set-row">

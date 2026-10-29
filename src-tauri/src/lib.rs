@@ -359,6 +359,37 @@ fn open_mb_release(release_id: String) -> Result<(), String> {
     open_url(&format!("https://musicbrainz.org/release/{release_id}"))
 }
 
+/// 在流媒体站点搜索这张专辑 (点击库卡片默认行为)
+#[tauri::command]
+fn open_stream_search(
+    album: String,
+    artist: String,
+    service: Option<String>,
+    kind: Option<String>,
+) -> Result<(), String> {
+    let q = format!("{} {}", album.trim(), artist.trim())
+        .trim()
+        .to_string();
+    if q.is_empty() {
+        return Err("专辑名为空".into());
+    }
+    let svc = service.as_deref().unwrap_or("netease");
+    let song = kind.as_deref() == Some("song");
+    let url = match svc {
+        "qq" => format!(
+            "https://y.qq.com/n/ryqq/search?w={}&t={}",
+            urlenc(&q),
+            if song { "song" } else { "album" }
+        ),
+        _ => format!(
+            "https://music.163.com/#/search/m/?s={}&type={}",
+            urlenc(&q),
+            if song { "1" } else { "10" }
+        ),
+    };
+    open_url(&url)
+}
+
 fn open_url(url: &str) -> Result<(), String> {
     if let Err(e) = std::process::Command::new("xdg-open").arg(url).spawn() {
         return Err(format!("打开浏览器失败: {e}"));
@@ -591,12 +622,29 @@ async fn fetch_album_extra(
     artist: String,
     year: Option<String>,
     track_count: Option<u32>,
+    discid: Option<String>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Option<meta::AlbumExtra>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        Ok(meta::fetch(&album, &artist, year.as_deref(), track_count))
+    // 先读光盘库缓存; 成功加载过的介绍/简介会一直保留到条目被移除
+    if let Some(did) = discid.as_deref() {
+        if let Some(v) = state.library.lock().unwrap().album_extra(did) {
+            if let Ok(extra) = serde_json::from_value::<meta::AlbumExtra>(v) {
+                return Ok(Some(extra));
+            }
+        }
+    }
+    let did = discid.clone();
+    let result: Option<meta::AlbumExtra> = tauri::async_runtime::spawn_blocking(move || {
+        Ok::<Option<meta::AlbumExtra>, String>(meta::fetch(&album, &artist, year.as_deref(), track_count))
     })
     .await
-    .map_err(|e| format!("任务失败: {e}"))?
+    .map_err(|e| format!("任务失败: {e}"))??;
+    if let (Some(did), Some(extra)) = (discid.as_deref(), result.as_ref()) {
+        if let Ok(v) = serde_json::to_value(extra) {
+            state.library.lock().unwrap().set_album_extra(did, &v);
+        }
+    }
+    Ok(result)
 }
 
 /// 手动上传封面: data URL -> 保存到本地封面缓存 (之后全应用复用)
@@ -727,13 +775,17 @@ async fn library_cover(
         }
         // 2) 网易云: 优先按专辑名匹配 (单曲不能拿同组专辑的封面)
         if let Ok(u) = netease::album_cover_url_by_album(&title, &artist) {
-            return Ok(netease_cover_data_url(Some(&u)));
+            if let Some((mime, bytes)) = netease_cover_bytes(Some(&u)) {
+                return Ok(Some(cache_cover_data(&release_id, &mime, &bytes)));
+            }
         }
         // 3) 专辑名搜不到时退回歌曲搜索
         if let Ok(songs) = netease::search(&title, &artist, None) {
             if let Some(best) = songs.first() {
                 if let Ok(u) = netease::album_cover_url(best.id) {
-                    return Ok(netease_cover_data_url(Some(&u)));
+                    if let Some((mime, bytes)) = netease_cover_bytes(Some(&u)) {
+                        return Ok(Some(cache_cover_data(&release_id, &mime, &bytes)));
+                    }
                 }
             }
         }
@@ -778,6 +830,21 @@ fn netease_cover_bytes(pic_url: Option<&str>) -> Option<(String, Vec<u8>)> {
 fn netease_cover_data_url(pic_url: Option<&str>) -> Option<String> {
     let (mime, bytes) = netease_cover_bytes(pic_url)?;
     Some(format!("data:{mime};base64,{}", b64(&bytes)))
+}
+
+/// 把下载的封面写入磁盘缓存, 返回可直接给 WebView 的 data URL。
+/// 库卡片重新挂载/搜索过滤后就不必再次联网取同一张图。
+fn cache_cover_data(release_id: &str, mime: &str, bytes: &[u8]) -> String {
+    let dir = cache_dir().join("covers");
+    let _ = std::fs::create_dir_all(&dir);
+    let ext = match mime {
+        "image/png" => "png",
+        "image/webp" => "webp",
+        _ => "jpg",
+    };
+    let label: String = release_id.chars().take(8).collect();
+    let _ = std::fs::write(dir.join(format!("{label}-{label}.{ext}")), bytes);
+    format!("data:{mime};base64,{}", b64(bytes))
 }
 
 #[tauri::command]
@@ -1044,6 +1111,7 @@ pub fn run() {
             get_release,
             open_mb_submit,
             open_mb_release,
+            open_stream_search,
             fetch_cover,
             fetch_lyrics,
             fetch_album_extra,

@@ -1,15 +1,18 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { LibraryDetail, type CoverRect } from "./LibraryDetail";
 import {
   libraryCover,
   libraryRemove,
   librarySetGroup,
   libraryUpdate,
   listLibrary,
+  openStreamSearch,
   refreshCover,
   saveCover,
   type LibraryEntry,
   type Release,
+  type StreamService,
 } from "../api";
 
 type SortMode = "manual" | "artist" | "date";
@@ -21,6 +24,9 @@ type Unit = {
   members: LibraryEntry[];
   labels: string[];
 };
+
+// 过滤/搜索会卸载重新挂载卡片; 封面用模块级缓存, 避免已加载的封面闪回占位图
+const coverCache = new Map<string, string | null>();
 
 const readOrder = (): string[] => {
   try {
@@ -306,7 +312,7 @@ function LibCard({
   onStartEdit: () => void;
   onSaveEdit: (title: string, artist: string) => void;
   onCancelEdit: () => void;
-  onActivate: () => void;
+  onActivate: (rect?: CoverRect) => void;
   onContext: (ev: React.MouseEvent) => void;
   onDragStart: (e: React.DragEvent) => void;
   onDragOver: (e: React.DragEvent) => void;
@@ -323,11 +329,23 @@ function LibCard({
   const first = r?.title ?? r?.media?.[0]?.tracks?.[0]?.title ?? "";
   const isGroup = groupLabels.length > 0;
 
+  const cacheKey = r?.id ?? e.discId;
   useEffect(() => {
     let alive = true;
+    if (coverCache.has(cacheKey)) {
+      const cached = coverCache.get(cacheKey);
+      if (cached) {
+        setCover(cached);
+        setLoading(false);
+        return;
+      }
+      // 之前的失败结果不缓存, 允许这次重新请求
+      coverCache.delete(cacheKey);
+    }
     setLoading(true);
     void libraryCover(r?.id ?? "", first, artist)
       .then((c) => {
+        if (c) coverCache.set(cacheKey, c);
         if (alive) {
           setCover(c);
           setLoading(false);
@@ -337,7 +355,7 @@ function LibCard({
     return () => {
       alive = false;
     };
-  }, [e.discId, r?.id, artist]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [e.discId, cacheKey, artist]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (editing) {
@@ -370,13 +388,17 @@ function LibCard({
         onDragEnd();
         window.setTimeout(() => (suppressClick.current = false), 200);
       }}
-      onClick={() => {
+      onClick={(ev) => {
         if (suppressClick.current) {
           suppressClick.current = false;
           return;
         }
         if (selecting && selectDisabled) return;
-        onActivate();
+        const coverEl = ev.currentTarget.querySelector(".lib-cover");
+        const b = coverEl?.getBoundingClientRect();
+        onActivate(
+          b ? { x: b.left, y: b.top, w: b.width, h: b.height } : undefined
+        );
       }}
       onContextMenu={(ev) => {
         ev.preventDefault();
@@ -384,19 +406,29 @@ function LibCard({
       }}
       title={
         isGroup
-          ? `点击查看 ${groupLabels.join("/")} 碟 · 右键编辑`
-          : "右键编辑 · 点击在 MusicBrainz 打开"
+          ? `点击查看详情 · 右键查看 ${groupLabels.join("/")} 碟`
+          : "点击查看详情 · 右键编辑 / MusicBrainz"
       }
     >
       <div className="lib-cover-wrap">
         {cover && <div className="lib-disc-ghost" />}
         <div className={"lib-cover" + (!cover && loading ? " loading" : "")}>
           {cover ? (
-            <img src={cover} alt="" />
+            <img src={cover} alt="" draggable={false} />
           ) : (
             <span className="lib-cover-empty">♫</span>
           )}
         </div>
+        <span className="lib-drag-handle" title="拖动排序" aria-hidden="true">
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="5" cy="3.5" r="1.35" />
+            <circle cx="11" cy="3.5" r="1.35" />
+            <circle cx="5" cy="8" r="1.35" />
+            <circle cx="11" cy="8" r="1.35" />
+            <circle cx="5" cy="12.5" r="1.35" />
+            <circle cx="11" cy="12.5" r="1.35" />
+          </svg>
+        </span>
         <button className="lib-play-hint" tabIndex={-1}>
           ▶
         </button>
@@ -464,12 +496,14 @@ export function LibraryView({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [sortMode, setSortMode] = useState<SortMode>(readSort);
+  const [query, setQuery] = useState("");
   const [order, setOrder] = useState<string[]>(readOrder);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const [selecting, setSelecting] = useState<{ group: string; label: string } | null>(null);
   const [prompt, setPrompt] = useState<{ group: string; label: string; title: string } | null>(null);
   const [openGroup, setOpenGroup] = useState<Unit | null>(null);
+  const [detail, setDetail] = useState<{ unit: Unit; index: number; origin?: CoverRect } | null>(null);
   const [flash, setFlash] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const fileDiscRef = useRef<string>("");
@@ -547,14 +581,48 @@ export function LibraryView({
     return [...ordered, ...extra];
   }, [units, sortMode, order]);
 
-  const menuUnit = menu ? shown.find((u) => u.key === menu.key) : null;
+  const visible = useMemo(() => {
+    const terms = query
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (terms.length === 0) return shown;
+    return shown.filter((u) => {
+      const hay = u.members
+        .map((m) =>
+          [
+            m.release.title,
+            artistOf(m),
+            m.discId,
+            m.discLabel,
+            m.release.date,
+            m.release.country,
+          ]
+            .filter(Boolean)
+            .join(" ")
+        )
+        .join(" ")
+        .toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    });
+  }, [shown, query]);
+
+  const menuUnit = menu ? visible.find((u) => u.key === menu.key) : null;
 
   const moveUnit = (from: number, to: number) => {
     if (from === to) return;
+    const fromKey = visible[from]?.key;
+    const toKey = visible[to]?.key;
+    if (!fromKey || !toKey) return;
+    // 基于完整 shown 顺序重排, 保证搜索过滤时隐藏的卡片位置不会丢
     const ids = shown.map((u) => u.key);
-    if (from < 0 || to < 0 || from >= ids.length || to >= ids.length) return;
-    const [moved] = ids.splice(from, 1);
-    ids.splice(to, 0, moved);
+    const fi = ids.indexOf(fromKey);
+    if (fi < 0) return;
+    ids.splice(fi, 1);
+    const ti = ids.indexOf(toKey);
+    if (ti < 0) return;
+    ids.splice(ti, 0, fromKey);
     setOrder(ids);
     setSortMode("manual");
   };
@@ -607,45 +675,96 @@ export function LibraryView({
     }
   };
 
+  const openStream = (unit: Unit, service: StreamService = "netease") => {
+    const title = unit.lead.release.title || "";
+    const artist = artistOf(unit.lead);
+    if (!title) {
+      setFlash("这张专辑没有可搜索的标题");
+      return;
+    }
+    void openStreamSearch(title, artist, service).catch(() =>
+      setFlash("打开流媒体失败")
+    );
+  };
+
   return (
     <div className={"library" + (selecting ? " selecting" : "")}>
       <div className="library-head">
         <div>
           <div className="library-title">本地光盘库</div>
           <div className="library-sub">
-            {shown.length} 张收藏 · 右键卡片编辑
+            {query.trim()
+              ? `${visible.length} / ${shown.length} 张收藏`
+              : `${shown.length} 张收藏`}
+            {" · "}右键卡片编辑
             {sortMode === "manual" ? " · 拖动卡片排序" : ""}
           </div>
         </div>
-        <div className="lib-sort">
-          <span>排序</span>
-          <button
-            className={"lib-sort-btn" + (sortMode === "manual" ? " on" : "")}
-            onClick={() => setSortMode("manual")}
-          >
-            手动
-          </button>
-          <button
-            className={"lib-sort-btn" + (sortMode === "artist" ? " on" : "")}
-            onClick={() => setSortMode("artist")}
-          >
-            歌手
-          </button>
-          <button
-            className={"lib-sort-btn" + (sortMode === "date" ? " on" : "")}
-            onClick={() => setSortMode("date")}
-          >
-            发行时间
-          </button>
+        <div className="library-tools">
+          <label className="lib-search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="6.5" />
+              <path d="m15.5 15.5 5 5" />
+            </svg>
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setDragFrom(null);
+                setDragOver(null);
+              }}
+              placeholder="搜索专辑、歌手或 DiscID"
+              aria-label="搜索光盘库"
+            />
+            {query && (
+              <button
+                className="lib-search-clear"
+                onClick={() => setQuery("")}
+                title="清除搜索"
+                type="button"
+              >
+                ✕
+              </button>
+            )}
+          </label>
+          <div className="lib-sort">
+            <span>排序</span>
+            <button
+              className={"lib-sort-btn" + (sortMode === "manual" ? " on" : "")}
+              onClick={() => setSortMode("manual")}
+            >
+              手动
+            </button>
+            <button
+              className={"lib-sort-btn" + (sortMode === "artist" ? " on" : "")}
+              onClick={() => setSortMode("artist")}
+            >
+              歌手
+            </button>
+            <button
+              className={"lib-sort-btn" + (sortMode === "date" ? " on" : "")}
+              onClick={() => setSortMode("date")}
+            >
+              发行时间
+            </button>
+          </div>
         </div>
       </div>
 
       {shown.length === 0 && (
         <div className="center-hint">插入光盘并识别成功后会自动收录</div>
       )}
+      {shown.length > 0 && visible.length === 0 && (
+        <div className="lib-no-results">
+          <div>没有找到匹配的专辑</div>
+          <button className="btn btn-ghost" onClick={() => setQuery("")}>
+            清除搜索
+          </button>
+        </div>
+      )}
 
       <div className="lib-grid">
-        {shown.map((u, i) => (
+        {visible.map((u, i) => (
           <LibCard
             key={u.key + refreshKey}
             e={u.lead}
@@ -665,13 +784,11 @@ export function LibraryView({
               });
             }}
             onCancelEdit={() => setEditingId(null)}
-            onActivate={() => {
+            onActivate={(origin) => {
               if (selecting) {
                 void selectTarget(u);
-              } else if (u.group) {
-                setOpenGroup(u);
-              } else if (u.lead.release.id) {
-                onOpenRelease(u.lead.release.id);
+              } else {
+                setDetail({ unit: u, index: 0, origin });
               }
             }}
             onContext={(ev) =>
@@ -712,6 +829,14 @@ export function LibraryView({
           onClose={() => setMenu(null)}
           items={[
             {
+              label: "▶ 在网易云音乐播放",
+              onClick: () => openStream(menuUnit, "netease"),
+            },
+            {
+              label: "▶ 在 QQ 音乐播放",
+              onClick: () => openStream(menuUnit, "qq"),
+            },
+            {
               label: "✏️ 编辑元数据",
               onClick: () => setEditingId(menuUnit.lead.discId),
             },
@@ -746,7 +871,10 @@ export function LibraryView({
                   r.releaseGroup?.id ?? null,
                   r.title ?? r.media?.[0]?.tracks?.[0]?.title ?? "",
                   r.artistCredit?.map((a) => a.name).join(" / ") ?? ""
-                ).then(refresh);
+                ).then(() => {
+                  coverCache.delete(r.id);
+                  refresh();
+                });
               },
             },
             {
@@ -825,6 +953,24 @@ export function LibraryView({
         />
       )}
 
+      {detail && (
+        <LibraryDetail
+          members={detail.unit.members}
+          labels={detail.unit.labels}
+          initialIndex={detail.index}
+          origin={detail.origin}
+          onClose={() => setDetail(null)}
+          onStream={(service) => openStream(detail.unit, service)}
+          onStreamTrack={(title, service) => {
+            const artist = artistOf(detail.unit.lead);
+            void openStreamSearch(title, artist, service, "song").catch(() =>
+              setFlash("打开流媒体失败")
+            );
+          }}
+          onOpenRelease={onOpenRelease}
+        />
+      )}
+
       {flash &&
         createPortal(
           <div className="library-flash">{flash}</div>,
@@ -843,7 +989,10 @@ export function LibraryView({
           rd.onload = () => {
             const rid = fileDiscRef.current;
             if (!rid) return;
-            void saveCover(rid, String(rd.result)).then(() => refresh());
+            void saveCover(rid, String(rd.result)).then(() => {
+              coverCache.delete(rid);
+              refresh();
+            });
           };
           rd.readAsDataURL(f);
           ev.target.value = "";

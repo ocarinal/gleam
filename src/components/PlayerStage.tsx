@@ -106,14 +106,12 @@ export function PlayerStage({
   canPlay,
   onCoverClick,
   onExitOnly,
-  lyricsOn,
   onRetryLyrics,
-  shuffle,
-  onToggleShuffle,
   lyricSourceMode,
   onPickLyricSource,
   onManualLyrics,
   panelVisible,
+  chromeVisible,
   onTogglePanel,
 }: {
   cover: string | null;
@@ -130,16 +128,14 @@ export function PlayerStage({
   onNext: () => void;
   onSeek: (secs: number) => void;
   canPlay: boolean;
-  onCoverClick: () => void;
+  onCoverClick: (rect?: { x: number; y: number; w: number; h: number }) => void;
   onExitOnly: () => void;
-  lyricsOn: boolean;
   onRetryLyrics: () => void;
-  shuffle: boolean;
-  onToggleShuffle: () => void;
   lyricSourceMode: LyricSource;
   onPickLyricSource: (s: LyricSource) => void;
   onManualLyrics: () => void;
   panelVisible: boolean;
+  chromeVisible: boolean;
   onTogglePanel: () => void;
 }) {
   const paused = !playing || (progress?.paused ?? true);
@@ -181,8 +177,7 @@ export function PlayerStage({
               {album && album !== title ? <div className="stage-album">{album}</div> : null}
             </div>
 
-            {lyricsOn && (
-              <div className="stage-lyrics">
+            <div className="stage-lyrics">
                 <LyricsInline
                   lines={lyrics}
                   time={progress?.time ?? 0}
@@ -195,14 +190,21 @@ export function PlayerStage({
                   onManualSearch={onManualLyrics}
                 />
               </div>
-            )}
 
           </div>
 
           <div
             className="stage-art"
-            onClick={onCoverClick}
-            title={lyrics.length > 0 ? "点击切换歌词" : undefined}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              onCoverClick({
+                x: r.left,
+                y: r.top,
+                w: r.width,
+                h: r.height,
+              });
+            }}
+            title="点击查看专辑信息"
           >
             <div className="stage-cd">
               {cover ? (
@@ -213,19 +215,19 @@ export function PlayerStage({
             </div>
           </div>
 
-          <div className="stage-dock">
+          <div
+            className={"stage-dock" + (chromeVisible ? "" : " chrome-hidden")}
+          >
             <PlayControlBar
               title={title}
               playing={playing}
               progress={progress}
               canPlay={canPlay}
-              shuffle={shuffle}
               panelVisible={panelVisible}
               onPrev={onPrev}
               onTogglePause={onTogglePause}
               onNext={onNext}
               onSeek={onSeek}
-              onToggleShuffle={onToggleShuffle}
               onTogglePanel={onTogglePanel}
             />
           </div>

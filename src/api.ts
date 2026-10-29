@@ -62,6 +62,8 @@ export interface AlbumExtra {
   artistBio: string | null;
   artistAvatar: string | null;
   source: string | null;
+  albumSource: string | null;
+  artistSource: string | null;
 }
 
 export interface Progress {
@@ -97,6 +99,14 @@ export const openMbSubmit = (tocString: string, releaseId: string | null) =>
   invoke<void>("open_mb_submit", { tocString, releaseId });
 export const openMbRelease = (releaseId: string) =>
   invoke<void>("open_mb_release", { releaseId });
+export type StreamService = "netease" | "qq";
+export type StreamKind = "album" | "song";
+export const openStreamSearch = (
+  album: string,
+  artist: string,
+  service: StreamService = "netease",
+  kind: StreamKind = "album"
+) => invoke<void>("open_stream_search", { album, artist, service, kind });
 export const fetchCover = (
   releaseId: string,
   rgId: string | null,
@@ -123,13 +133,15 @@ export const fetchAlbumExtra = (
   album: string,
   artist: string,
   year: string | null,
-  trackCount: number | null
+  trackCount: number | null,
+  discId?: string | null
 ) =>
   invoke<AlbumExtra | null>("fetch_album_extra", {
     album,
     artist,
     year,
     trackCount,
+    discid: discId ?? null,
   });
 export const listLibrary = () => invoke<LibraryEntry[]>("list_library");
 export const libraryCover = (releaseId: string, title: string, artist: string) =>

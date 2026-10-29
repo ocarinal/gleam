@@ -70,7 +70,7 @@ pub fn search(
 ) -> Result<Vec<NeteaseSong>, String> {
     let q = format!("{title} {artist}");
     let url = format!(
-        "{NETEASE_API}/search/get/web?s={}&type=1&limit=10&offset=0",
+        "{NETEASE_API}/search/get?s={}&type=1&limit=10&offset=0",
         enc(&q)
     );
     let v = get_json(&url)?;
@@ -193,7 +193,7 @@ pub fn candidate(
 pub fn album_cover_url_by_album(album: &str, artist: &str) -> Result<String, String> {
     let q = format!("{album} {artist}");
     let url = format!(
-        "{NETEASE_API}/search/get/web?s={}&type=10&limit=10&offset=0",
+        "{NETEASE_API}/search/get?s={}&type=10&limit=10&offset=0",
         enc(&q)
     );
     let v = get_json(&url)?;
