@@ -2,97 +2,110 @@
 
 **English** | [简体中文](README.zh.md)
 
-An offline CD player for the Linux desktop.
+A physical CD player for the Linux desktop, built with Tauri 2, React and libmpv.
 
-Gleam is a local CD player built with Tauri 2, React and libmpv.
+Insert a CD and Gleam reads its TOC, looks up the release on MusicBrainz, then fetches cover art, album information and lyrics. Recognized discs are kept in a local library, so the next insertion is instant. Playback runs inside the app through libmpv — no separate player window.
 
-Insert a CD: Gleam reads the disc's TOC, looks up album information on MusicBrainz by DiscID, then fetches cover art and lyrics. Recognized albums are saved to a local library, so the next time you insert the same disc, everything is loaded straight from the local data.
-
-Playback is handled by libmpv, integrated directly into the app — no external mpv window or separate player is needed.
+**Latest release:** [v0.2.1](https://github.com/ocarinal/gleam/releases/tag/v0.2.1) · [Changelog](CHANGELOG.md)
 
 ## Screenshots
 
-**Now playing · synced lyrics**
+### Home
 
-Lyrics are sourced from LRCLIB, with synced scrolling and click-to-seek.
+![Home](docs/screenshots/home.png)
 
-![playing-lyrics](docs/screenshots/playing-lyrics.png)
+### Now playing
 
-**Now playing · track list**
+Synced, word-by-word lyrics with translations, plus a transparent glass control bar.
 
-The TOC is read right after insertion, so you can see all tracks before the online lookup even finishes.
+![Now playing](docs/screenshots/now-playing.png)
 
-![playing-tracklist](docs/screenshots/playing-tracklist.png)
+### Local library
+
+Album cards, cover art, and manual / artist / release-date sorting.
+
+![Library](docs/screenshots/library.png)
+
+### Album information
+
+MusicBrainz release data with album and artist descriptions from NetEase Cloud Music / QQ Music.
+
+![Album information](docs/screenshots/album-info.png)
 
 ## Features
 
 ### CD playback
 
-- TOC is read immediately after inserting a CD, tracks show up fast
-- Disc info is read through Linux ioctl
-- Plays through libmpv — no separate player process is started
-- Play, pause, resume, seeking and volume control
-- Previous / next track
-- Shuffle
-- Repeat one / repeat all
-- Auto-advance to the next track
-- Now-playing view shows cover art, track list and synced lyrics
-- Ambient background effect derived from the cover art
+- Reads the TOC immediately with Linux ioctl, tracks show up before the network lookup finishes
+- Plays through libmpv linked in-process — no external mpv process
+- Play / pause / resume, seek, volume
+- Previous / next track, shuffle, repeat one / repeat all
+- Play queue panel with drag-to-reorder and right-click “Play next”
+- Queue order is used for next/previous and track-boundary switches
+- Auto-advance between tracks
 
-### Disc recognition
+### Disc identification
 
-- CD identification via MusicBrainz DiscID
-- Fallback search by artist and album name when the DiscID isn't known
-- One-click submission of the current DiscID to MusicBrainz
-- Barcode used as a secondary check to confirm the exact release
+- MusicBrainz DiscID lookup, cached locally after the first match
+- When the DiscID is not in MusicBrainz:
+  - reads MCN barcode and per-track ISRCs through `cd-info`
+  - tries MusicBrainz barcode search first
+  - then resolves ISRC → recording → releases, matching the track count
+- Live identification HUD showing: TOC → DiscID → MCN / ISRC → release matching
+- “Retry matching” on the unidentified screen
+- “Search album” from the home screen or album page
+- Clear failure reasons on screen
+- One-click DiscID submission to MusicBrainz
 
 ### Local disc library
 
-Recognized CDs are saved to a local library automatically.
-
-The library is fully local — no need to hit the network every time you open the app.
-
-What you can do:
-
-- Save the mapping between a CD and its MusicBrainz release
-- Override the album title and artist
-- Upload or replace cover art from local files
-- Re-fetch cover art
-- Remove entries from the library
-- Multi-disc sets: record Disc 1 / Disc 2 separately
-
-Library cards have subtle hover/entry animations, and clicking a card opens the release on MusicBrainz.
+- Automatically saves recognized discs and their MusicBrainz release
+- Local JSON storage; repeat insertions do not re-query the network
+- Edit album title / artist
+- Upload, replace or refresh cover art
+- Remove entries or a whole disc set
+- **Multi-disc sets:** group A/B/C/D discs under one album card
+  - one cover in the grid, click to open the full disc list
+  - add the next disc from the context menu
+  - grouping survives reinsertion of the same disc
+- Sorting: manual drag order, artist, release date (newest first)
 
 ### Lyrics
 
-Lyrics come from two sources:
+Sources:
 
 - LRCLIB
 - NetEase Cloud Music
+- QQ Music
+- Kugou Music
 
-LRCLIB is tried first, matching by track name, duration and more. If that misses, NetEase is used.
+Priority: **bilingual word-timed → bilingual → word-timed → plain synced**.
 
-What you get:
-
-- Synced lyrics
-- Current line highlighting
-- Click a line to seek to that point
+- Right-click lyrics to switch the lyric source; the choice is remembered
+- Synced scrolling, click a line to seek
+- Word-by-word highlighting for enhanced LRC / KRC sources
 - Translation lines
-- Manual re-search when a lookup fails
-- Caching
+- Long lyrics automatically reduce type size and improve line wrapping
+- Manual lookup with custom title/artist; successful results are saved locally
+- Source-specific fetch and local manual cache
 
-To avoid wrong matches, lookups are validated beyond a plain name search.
+### Album information
 
-### Appearance
+- MusicBrainz release metadata
+- Album description and artist bio/avatar on the right
+- Additional information from NetEase Cloud Music and QQ Music
+- “Search album” re-match for the current DiscID
+- Unknown-disc page with centered diagnostics and actions
 
-Some basic personalization options:
+### Interface
 
-- App font (picks from any font on your system)
-- Text size (scales the text only, layout is untouched)
-- Accent color
-- Background light effect on/off
-
-The UI is dark, glassy and restrained with its animation.
+- Home: cover on the left, track list on the right
+- Now playing: lyrics on the left, cover on the right
+- Shared-element cover transition from home to now playing
+- Transparent, thin-outline bottom control bar; hover to reveal controls
+- Bundled **Huixin** font used by default
+- 115% default UI scale, responsive fullscreen layout
+- Ambient background derived from the current cover
 
 ## Tech stack
 
@@ -100,36 +113,27 @@ The UI is dark, glassy and restrained with its animation.
 |---|---|
 | Desktop shell | Tauri 2 / Rust |
 | Frontend | React + TypeScript + Vite |
-| Playback | libmpv |
+| Playback | libmpv (in-process FFI) |
 | CD reading | Linux ioctl |
 | DiscID | Own MusicBrainz DiscID implementation |
 | Album metadata | MusicBrainz API |
-| Lyrics | LRCLIB / NetEase Cloud Music |
-| Cover art | Cover Art Archive / NetEase CDN |
-| Storage | Local cache |
-
-### About DiscID
-
-The DiscID calculation follows the MusicBrainz algorithm and has been validated against the official example.
-
-### About playback
-
-libmpv is linked in-process through FFI — no separate mpv process is spawned. Playback and UI are both fully controlled by Gleam itself.
+| Album / artist descriptions | NetEase Cloud Music, QQ Music |
+| Lyrics | LRCLIB, NetEase Cloud Music, QQ Music, Kugou Music |
+| Cover art | Cover Art Archive, NetEase Cloud Music |
+| Storage | Local JSON + cache |
 
 ## Getting started
 
-First off: Gleam is **Linux only**.
-
-CD reading relies on Linux ioctl interfaces, so Windows and macOS are unsupported for now.
+Gleam is **Linux only** for now. CD reading uses Linux ioctl interfaces; Windows and macOS are not supported.
 
 ### 1. Install dependencies
 
-Package names differ between distros; install what your system provides.
+Package names vary by distribution.
 
 **Arch / CachyOS:**
 
 ```bash
-sudo pacman -S webkit2gtk-4.1 mpv base-devel nodejs npm
+sudo pacman -S webkit2gtk-4.1 mpv base-devel nodejs npm libcdio
 ```
 
 **Debian / Ubuntu:**
@@ -137,81 +141,69 @@ sudo pacman -S webkit2gtk-4.1 mpv base-devel nodejs npm
 ```bash
 sudo apt install build-essential curl wget file libssl-dev \
   libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-  libayatana-appindicator3-dev libmpv2 mpv nodejs npm
+  libayatana-appindicator3-dev libmpv2 mpv libcdio-utils nodejs npm
 ```
 
-`libmpv` and `webkit2gtk-4.1` are required — audio is played through mpv, and Tauri runs the UI on WebKitGTK. Without them the build will not even start.
+Required: `libmpv` and `webkit2gtk-4.1`.
+Optional: `cd-info` (from `libcdio` / `libcdio-utils`) is used for MCN/ISRC fallback identification. Without it, Gleam falls back to DiscID + manual search.
 
 ### 2. Install Rust and Node.js
 
-Rust — use rustup, the recommended installer:
+Rust via rustup:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Node.js 18 or newer. If your distro's version is too old, use nvm.
+Node.js 18 or newer.
 
-### 3. Get the project
+### 3. Clone and run
 
 ```bash
 git clone https://github.com/ocarinal/gleam.git
 cd gleam
 npm install
-```
-
-### 4. Run
-
-Development mode:
-
-```bash
 npm run tauri dev
 ```
 
-The first run compiles all Rust dependencies and can take a few minutes. If the terminal goes quiet for a while, it's probably still compiling — leave it alone.
-
-To build a release:
+Release build:
 
 ```bash
 npm run tauri build
-```
-
-The binary can then be run directly:
-
-```bash
 ./src-tauri/target/release/sounddisc
 ```
 
-.deb and .rpm packages are produced as well. For an AppImage, install fuse2 additionally.
+`.deb` / `.rpm` packages are produced by the default bundle targets. For an AppImage, install `fuse2`.
 
-### 5. First-run issues
+### 4. First-run notes
 
 **No permission to read the drive**
-
-If the app cannot read the CD, add your user to the optical group:
 
 ```bash
 sudo usermod -aG optical $USER
 ```
 
-Then log out and back in.
+Log out and back in.
 
-**Cover art fails to download**
+**Network proxy**
 
-Cover art is fetched from Cover Art Archive first. If that's unreachable from your network, Gleam falls back to NetEase's cover source.
-
-**Using a proxy**
-
-If your network needs a proxy, just set the environment variables. Example:
+All MusicBrainz, lyric and cover requests honour standard proxy variables:
 
 ```bash
 https_proxy=http://127.0.0.1:7890 npm run tauri dev
 ```
 
-Recognition, lyrics and cover art requests all go through it.
+**A disc with no metadata**
 
-Insert a CD when you're ready: Gleam will recognize the album, fetch cover art and lyrics, and add it to your local library automatically.
+Some self-burned or unregistered discs have no DiscID match, no MCN, no ISRC and no CD-TEXT. Gleam shows the reason and offers manual album search / DiscID submission; automatic matching is not possible for such discs.
+
+## Limitations
+
+- Linux only.
+- Lyrics and some cover/description sources are unofficial web APIs; availability can change. Use them for personal use and respect each service's terms.
+- Cover art may be wrong when a streaming service maps a single to a different album; use “Refresh cover” / upload a local cover if needed.
+- `cd-info` fallback is Linux-specific.
 
 ## License
 
-MIT. Metadata/lyrics/cover art come from [MusicBrainz](https://musicbrainz.org) / [LRCLIB](https://lrclib.net) / NetEase Cloud Music (for personal use only — please respect their terms of service).
+MIT. Metadata, lyrics and cover art come from [MusicBrainz](https://musicbrainz.org), [LRCLIB](https://lrclib.net), NetEase Cloud Music, QQ Music and Kugou Music. Please respect their terms of service.

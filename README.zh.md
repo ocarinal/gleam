@@ -2,97 +2,110 @@
 
 [English](README.md) | **简体中文**
 
-一款给 Linux 桌面用的实体 CD 播放器。
+一款给 Linux 桌面用的实体 CD 播放器，基于 Tauri 2、React 和 libmpv。
 
-Gleam 是一个基于 Tauri 2、React 和 libmpv 开发的本地 CD 播放器。
+插入 CD 后，Gleam 会读取光盘 TOC，从 MusicBrainz 获取发行信息，再获取封面、专辑介绍和歌词。识别过的光盘会保存在本地库，下次插入直接使用。播放通过 libmpv 集成在应用内，不会另外打开播放器窗口。
 
-插入 CD 后，程序会读取光盘的 TOC，根据 DiscID 从 MusicBrainz 获取专辑信息，再获取封面和歌词。识别完成后，专辑会保存到本地收藏库，之后再次插入同一张 CD 就可以直接使用之前保存的信息。
-
-播放使用 libmpv，直接集成在程序里，不需要另外打开 mpv 或其他播放器。
+**当前版本：** [v0.2.1](https://github.com/ocarinal/gleam/releases/tag/v0.2.1) · [更新日志](CHANGELOG.md)
 
 ## 界面预览
 
-**播放页 · 同步歌词**
+### 首页
 
-歌词来自 LRCLIB，支持同步滚动和点击歌词跳转。
+![首页](docs/screenshots/home.png)
 
-![播放页-同步歌词](docs/screenshots/playing-lyrics.png)
+### 正在播放
 
-**播放页 · 曲目列表**
+支持逐字同步歌词、翻译，以及底部透明播放条。
 
-插入 CD 后会先读取 TOC，因此不需要等网络识别完成就能看到光盘中的曲目。
+![正在播放](docs/screenshots/now-playing.png)
 
-![播放页-曲目列表](docs/screenshots/playing-tracklist.png)
+### 本地光盘库
+
+专辑卡片、封面，以及手动 / 歌手 / 发行时间排序。
+
+![本地光盘库](docs/screenshots/library.png)
+
+### 专辑信息
+
+MusicBrainz 发行信息，右侧显示来自网易云音乐 / QQ 音乐的专辑介绍和歌手信息。
+
+![专辑信息](docs/screenshots/album-info.png)
 
 ## 功能
 
 ### CD 播放
 
-- 插入 CD 后直接读取 TOC，快速显示曲目
-- 使用 Linux ioctl 读取光盘信息
-- 使用 libmpv 播放，不启动额外的播放器进程
-- 支持播放、暂停、继续、进度调整和音量控制
-- 上一首 / 下一首
-- 随机播放
-- 单曲循环 / 全部循环
-- 自动播放下一首
-- 播放页面显示专辑封面、曲目列表和同步歌词
-- 根据专辑封面生成背景光效
+- 插入后立即读取 TOC（Linux ioctl），网络识别完成前就能看到曲目
+- libmpv 进程内播放，不启动额外的 mpv 进程
+- 播放 / 暂停 / 继续、进度跳转、音量
+- 上一首 / 下一首、随机播放、单曲循环 / 全部循环
+- 播放队列面板：拖动排序、右键“下一首播放”
+- 队列顺序用于上一首 / 下一首和曲目边界切换
+- 自动连播
 
-### 专辑识别
+### 光盘识别
 
-- 使用 MusicBrainz DiscID 识别 CD
-- DiscID 识别失败时，可以通过艺术家和专辑名进行搜索
-- 可以直接将当前 CD 的 DiscID 提交到 MusicBrainz
-- 支持通过 Barcode 辅助确认具体发行版本
+- MusicBrainz DiscID 识别，首次成功后写入本地库
+- DiscID 查不到时自动兜底：
+  - 通过 `cd-info` 读取 MCN 条码和每轨 ISRC
+  - 先按 MusicBrainz 条码搜索
+  - 再按 ISRC → recording → releases 匹配，并校验音轨数
+- 顶部识别进度 HUD：读取目录 → DiscID → MCN / ISRC → 匹配发行版
+- 未识别页支持“重新匹配”
+- 首页和专辑页都提供“搜索专辑”
+- 识别失败会显示具体原因
+- 一键提交 DiscID 到 MusicBrainz
 
-### 光盘收藏库
+### 本地光盘库
 
-识别成功的 CD 会自动保存到本地收藏库。
-
-收藏库保存的是本地数据，不需要每次打开程序都重新查询网络。
-
-支持：
-
-- 保存 CD 与 MusicBrainz 专辑的对应关系
-- 修改专辑名称和艺术家
-- 本地上传或更换封面
-- 重新获取封面
-- 删除收藏
-- 双碟专辑分别记录 Disc 1 / Disc 2
-
-收藏卡片支持简单的悬停和播放动画，点击专辑可以查看对应的 MusicBrainz 页面。
+- 自动保存识别过的光盘和对应的 MusicBrainz 发行版
+- 本地 JSON 存储，再次插入不重复查询网络
+- 修改专辑名 / 艺术家
+- 上传、更换或刷新封面
+- 删除单张光盘或整个碟组
+- **多碟合集：** A/B/C/D 碟合成一张专辑卡片
+  - 库中只显示一张封面，点击查看全部碟片
+  - 右键继续增加下一张碟
+  - 重新插入同一张碟也不会丢失编组
+- 排序：手动拖动、按歌手、按发行时间（新到旧）
 
 ### 歌词
 
-歌词目前使用两个来源：
+来源：
 
 - LRCLIB
 - 网易云音乐
+- QQ 音乐
+- 酷狗音乐
 
-LRCLIB 会优先根据歌曲名称、时长等信息进行匹配。找不到时再尝试网易云。
+优先级：**双语逐字 → 双语 → 单语逐字 → 单语同步**。
 
-支持：
-
-- 同步歌词
-- 当前歌词自动高亮
-- 点击歌词跳转到对应位置
+- 右键歌词切换歌词源，选择会记住
+- 同步滚动、点击歌词跳转
+- 增强 LRC / KRC 支持逐字高亮
 - 翻译歌词
-- 手动重新搜索
-- 歌词缓存
+- 长歌词自动缩小字号并优化换行
+- 手动查找支持自定义歌名 / 歌手，成功后保存到本地
+- 指定源获取 + 本地手动缓存
 
-为了避免错误匹配，歌词会进行额外的信息校验，而不是只根据歌曲名称搜索。
+### 专辑信息
 
-### 外观设置
+- MusicBrainz 发行信息
+- 右侧展示专辑介绍、歌手头像和简介
+- 数据来自网易云音乐 + QQ 音乐
+- 当前 DiscID 支持“搜索专辑”重新匹配
+- 未识别页居中显示诊断信息和操作入口
 
-目前提供一些比较基础的个性化选项：
+### 界面
 
-- 应用字体
-- 软件字号
-- 强调色
-- 背景光效开关
-
-界面整体采用深色、毛玻璃和比较克制的动画效果。
+- 首页：左侧封面，右侧曲目
+- 播放页：左侧歌词，右侧封面
+- 首页到播放页的封面共享元素过渡
+- 透明细边框底部播放条，悬浮显示控件
+- 内置慧心字体并默认使用
+- 默认 115% UI 缩放，全屏时按比例适配
+- 根据当前封面生成氛围背景
 
 ## 技术栈
 
@@ -100,36 +113,27 @@ LRCLIB 会优先根据歌曲名称、时长等信息进行匹配。找不到时�
 |---|---|
 | 桌面框架 | Tauri 2 / Rust |
 | 前端 | React + TypeScript + Vite |
-| 播放 | libmpv |
+| 播放 | libmpv（进程内 FFI） |
 | CD 读取 | Linux ioctl |
 | DiscID | 自己实现的 MusicBrainz DiscID 算法 |
 | 专辑信息 | MusicBrainz API |
-| 歌词 | LRCLIB / 网易云音乐 |
-| 封面 | Cover Art Archive / 网易云 CDN |
-| 数据存储 | 本地缓存 |
-
-### 关于 DiscID
-
-DiscID 的计算按照 MusicBrainz 的算法实现，并使用官方示例进行过校验。
-
-### 关于播放
-
-libmpv 是直接通过 FFI 集成到应用中的，不会额外启动一个 mpv 进程。因此播放和界面都由 Gleam 自己控制。
+| 专辑 / 歌手介绍 | 网易云音乐、QQ 音乐 |
+| 歌词 | LRCLIB、网易云音乐、QQ 音乐、酷狗音乐 |
+| 封面 | Cover Art Archive、网易云音乐 |
+| 存储 | 本地 JSON + 缓存 |
 
 ## 快速开始
 
-先说一下，Gleam 目前只支持 Linux。
-
-因为读取 CD 用到了 Linux 的 ioctl 接口，所以 Windows 和 macOS 目前没法直接运行。
+目前只支持 **Linux**。读取 CD 使用 Linux ioctl 接口，Windows / macOS 暂不支持。
 
 ### 1. 安装依赖
 
-不同发行版的包名不太一样，按照你自己的系统安装即可。
+不同发行版包名不同。
 
 **Arch / CachyOS：**
 
 ```bash
-sudo pacman -S webkit2gtk-4.1 mpv base-devel nodejs npm
+sudo pacman -S webkit2gtk-4.1 mpv base-devel nodejs npm libcdio
 ```
 
 **Debian / Ubuntu：**
@@ -137,83 +141,69 @@ sudo pacman -S webkit2gtk-4.1 mpv base-devel nodejs npm
 ```bash
 sudo apt install build-essential curl wget file libssl-dev \
   libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-  libayatana-appindicator3-dev libmpv2 mpv nodejs npm
+  libayatana-appindicator3-dev libmpv2 mpv libcdio-utils nodejs npm
 ```
 
-其中 libmpv 和 webkit2gtk-4.1 是必须的。
+必须：`libmpv`、`webkit2gtk-4.1`。
+可选：`cd-info`（来自 `libcdio` / `libcdio-utils`），用于 MCN / ISRC 兜底识别。未安装时退回 DiscID + 手动搜索。
 
 ### 2. 安装 Rust 和 Node.js
 
-Rust 推荐直接使用 rustup：
+Rust 推荐 rustup：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-Node.js 需要 18 或更高版本。如果系统自带的版本比较旧，可以用 nvm 安装。
+Node.js 18 或更高版本。
 
-### 3. 下载项目
+### 3. 克隆并运行
 
 ```bash
 git clone https://github.com/ocarinal/gleam.git
 cd gleam
 npm install
-```
-
-### 4. 启动
-
-开发环境直接运行：
-
-```bash
 npm run tauri dev
 ```
 
-第一次运行需要编译 Rust 依赖，可能会花几分钟。如果终端一段时间没有输出，一般是在编译，不用急着关掉。
-
-如果想编译正式版本：
+正式构建：
 
 ```bash
 npm run tauri build
-```
-
-编译完成后可以直接运行：
-
-```bash
 ./src-tauri/target/release/sounddisc
 ```
 
-同时也会生成对应的 .deb / .rpm 安装包。
+默认会生成 `.deb` / `.rpm` 安装包。需要 AppImage 时另外安装 `fuse2`。
 
-如果需要 AppImage，需要另外安装 fuse2。
-
-### 5. 第一次使用可能遇到的问题
+### 4. 第一次使用
 
 **光驱没有权限**
-
-如果程序无法读取光盘，可以把当前用户加入 optical 用户组：
 
 ```bash
 sudo usermod -aG optical $USER
 ```
 
-然后重新登录系统。
-
-**封面获取失败**
-
-封面主要通过 Cover Art Archive 获取。如果当前网络访问不了，程序会尝试使用网易云的封面源。
+重新登录。
 
 **使用代理**
 
-如果你的网络需要代理，可以直接设置环境变量。例如：
+MusicBrainz、歌词和封面请求都会走标准代理环境变量：
 
 ```bash
 https_proxy=http://127.0.0.1:7890 npm run tauri dev
 ```
 
-识别、歌词和封面请求都会使用这个代理。
+**没有元数据的 CD**
 
-安装完成后插入 CD，Gleam 会自动尝试识别专辑、获取封面和歌词，并将专辑加入收藏库。
+部分自刻盘 / 未收录光盘没有 DiscID、MCN、ISRC 和 CD-TEXT。Gleam 会显示失败原因，并提供手动搜索 / 提交 DiscID；这类光盘无法自动匹配。
+
+## 已知限制
+
+- 仅支持 Linux。
+- 歌词和部分封面 / 介绍源是非官方 Web API，随时可能变化；请仅作个人使用并遵守各服务条款。
+- 流媒体源可能把单曲错误映射到同组专辑封面；可以用“刷新封面”或手动上传替换。
+- `cd-info` 兜底识别仅适用于 Linux。
 
 ## 许可
 
-MIT。元数据/歌词/封面来自 [MusicBrainz](https://musicbrainz.org) / [LRCLIB](https://lrclib.net) / 网易云音乐（仅本地自用，请遵守各服务条款）。
+MIT。元数据、歌词和封面来自 [MusicBrainz](https://musicbrainz.org)、[LRCLIB](https://lrclib.net)、网易云音乐、QQ 音乐和酷狗音乐，请遵守各服务条款。
