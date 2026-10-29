@@ -397,6 +397,13 @@ export function SettingsView({
     void import("../api").then((m) => m.listFonts()).then(setFonts).catch(() => {});
   }, []);
 
+  const switchLanguage = (lang: "zh" | "en") => {
+    const next = { ...settings, lang };
+    localStorage.setItem("sd-settings", JSON.stringify(next));
+    upSettings({ lang });
+    window.setTimeout(() => window.location.reload(), 80);
+  };
+
   const saveMeta = () => {
     upSettings({
       albumTitle: localTitle !== null ? localTitle : settings.albumTitle ?? "",
@@ -413,6 +420,23 @@ export function SettingsView({
 
       <div className="set-card">
         <div className="set-title">外观</div>
+        <div className="set-row">
+          <span>界面语言</span>
+          <div className="seg">
+            <button
+              className={"seg-btn" + ((settings.lang ?? "zh") === "zh" ? " on" : "")}
+              onClick={() => switchLanguage("zh")}
+            >
+              中文
+            </button>
+            <button
+              className={"seg-btn" + (settings.lang === "en" ? " on" : "")}
+              onClick={() => switchLanguage("en")}
+            >
+              English
+            </button>
+          </div>
+        </div>
         <div className="set-row col">
           <span className="set-label">应用字体 (调用电脑字体)</span>
           <FontPicker
@@ -536,7 +560,7 @@ export function SettingsView({
         </div>
         <div className="set-row">
           <span>版本</span>
-          <span className="set-val">SoundDisc 0.1 · Tauri 2 · libmpv</span>
+          <span className="set-val">Gleam 1.0.0 · Tauri 2 · libmpv</span>
         </div>
       </div>
     </div>

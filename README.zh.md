@@ -6,7 +6,7 @@
 
 插入光盘后，Gleam 读取 TOC，从 MusicBrainz 获取发行信息，再加载封面、专辑介绍和歌词。识别过的光盘会保存在本地，下次插入直接使用。
 
-**当前版本：** [v1.0.0](https://github.com/ocarinal/gleam/releases/tag/v1.0.0) · [更新日志](CHANGELOG.md)
+**当前版本：** [v1.1.0](https://github.com/ocarinal/gleam/releases/tag/v1.1.0) · [更新日志](CHANGELOG.md)
 
 ## 界面
 
@@ -18,13 +18,17 @@
 
 ![专辑信息](docs/screenshots/album-info.png)
 
+![设置](docs/screenshots/settings.png)
+
+![英文界面](docs/screenshots/settings-en.png)
+
 ## 功能
 
 - **CD 播放** — 进程内 libmpv、TOC、进度、音量、播放队列、随机和循环。
 - **光盘识别** — MusicBrainz DiscID；DiscID 未收录时用 MCN/ISRC 兜底。支持进度提示、重新匹配、手动搜索和提交 DiscID。
 - **本地光盘库** — 搜索、拖动排序、A/B/C/D 碟组合集；点击卡片查看大封面、专辑/歌手介绍和曲目。
 - **歌词** — LRCLIB、网易云、QQ 音乐、酷狗；右键切换来源，支持逐字、翻译、手动查找和缓存。
-- **界面** — 封面流动氛围、可收起侧栏、固定强调色或跟随封面取色、慧心字体、115% 缩放。
+- **界面** — 中英文切换、封面流动氛围、可收起侧栏、固定强调色或跟随封面取色、慧心字体、115% 缩放。
 - **键盘** — 空格播放暂停、方向键快进/音量、`Ctrl`+方向键切歌、`N/P`、`M`、`S`、`R`、`L`、`Q` 以及媒体键。
 
 ## 技术栈
