@@ -1,6 +1,6 @@
 [package]
 name = "sounddisc"
-version = "0.2.0"
+version = "0.2.1"
 description = "本地 CD 播放器"
 edition = "2021"
 

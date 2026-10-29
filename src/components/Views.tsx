@@ -24,6 +24,9 @@ export function InfoView({
   onSearch,
   onMbSubmit,
   onMbOpen,
+  onRetryIdentify,
+  retrying,
+  hint,
 }: {
   disc: TocInfo;
   release: Release | null;
@@ -31,6 +34,9 @@ export function InfoView({
   onSearch: () => void;
   onMbSubmit: () => void;
   onMbOpen: () => void;
+  onRetryIdentify?: () => void;
+  retrying?: boolean;
+  hint?: string;
 }) {
   const infoArtists =
     release?.artistCredit?.map((a) => a.name).join(" / ") || "";
@@ -83,10 +89,20 @@ export function InfoView({
             <span className="unknown-dot" />
             <span className="unknown-discid">DiscID {disc.discid}</span>
           </div>
+          {hint ? <div className="unknown-diagnostic">{hint}</div> : null}
           <div className="unknown-actions">
             <button className="btn unknown-search btn-with-icon" onClick={onSearch}>
               <SearchIcon /> 搜索专辑
             </button>
+            {onRetryIdentify && (
+              <button
+                className="btn btn-ghost"
+                onClick={onRetryIdentify}
+                disabled={retrying}
+              >
+                {retrying ? "匹配中…" : "⟳ 重新匹配"}
+              </button>
+            )}
             <button className="btn btn-ghost" onClick={onMbSubmit}>
               ⬆ 提交 DiscID
             </button>

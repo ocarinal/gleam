@@ -83,8 +83,11 @@ export interface LibraryEntry {
 }
 
 export const detectDisc = () => invoke<TocInfo>("detect_disc");
-export const resolveDisc = (discid: string) =>
-  invoke<{ release: Release; medium: number } | null>("resolve_disc", { discid });
+export const resolveDisc = (discid: string, device?: string | null) =>
+  invoke<{ release: Release; medium: number } | null>("resolve_disc", {
+    discid,
+    device: device ?? null,
+  });
 export const confirmReleaseForDisc = (discid: string, releaseId: string) =>
   invoke<Release>("confirm_release_for_disc", { discid, releaseId });
 export const searchReleases = (query: string) =>
@@ -167,3 +170,14 @@ export const onEnded = (cb: () => void) =>
 /** 光盘插拔事件 (udev 被动监听) */
 export const onDriveMedia = (cb: () => void) =>
   listen("drive-media", () => cb());
+
+export interface IdentifyProgress {
+  stage: string;
+  message: string;
+  detail: string | null;
+  done: boolean;
+  ok: boolean;
+}
+
+export const onIdentifyProgress = (cb: (p: IdentifyProgress) => void) =>
+  listen<IdentifyProgress>("identify-progress", (e) => cb(e.payload));

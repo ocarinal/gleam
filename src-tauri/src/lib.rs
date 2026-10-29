@@ -132,28 +132,183 @@ async fn detect_disc(state: tauri::State<'_, AppState>) -> Result<TocInfo, Strin
     })
 }
 
+/// 识别进度事件: 前端据此显示读取/查询阶段
+fn emit_identify(
+    app: &tauri::AppHandle,
+    stage: &str,
+    message: &str,
+    detail: Option<String>,
+    done: bool,
+    ok: bool,
+) {
+    let _ = app.emit(
+        "identify-progress",
+        serde_json::json!({
+            "stage": stage,
+            "message": message,
+            "detail": detail,
+            "done": done,
+            "ok": ok,
+        }),
+    );
+}
+
 /// 缓存优先的识别: 库里有的盘直接返回, 否则 MusicBrainz 查询并写入缓存
 #[tauri::command]
-async fn resolve_disc(discid: String, state: tauri::State<'_, AppState>) -> Result<Option<serde_json::Value>, String> {
+async fn resolve_disc(
+    discid: String,
+    device: Option<String>,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<serde_json::Value>, String> {
     let discid2 = discid.clone();
     if let Some(v) = state.library.lock().unwrap().get(&discid) {
         let rel: mb::Release = serde_json::from_value(v.get("release").cloned().unwrap_or_default())
             .map_err(|e| format!("缓存解析失败: {e}"))?;
         let medium = v.get("medium").and_then(|m| m.as_u64()).unwrap_or(0) as u32;
+        emit_identify(
+            &app,
+            "cache",
+            "使用本地缓存",
+            Some(rel.title.clone()),
+            true,
+            true,
+        );
         return Ok(Some(serde_json::json!({ "release": rel, "medium": medium })));
     }
+
+    emit_identify(
+        &app,
+        "discid",
+        "查询 MusicBrainz DiscID…",
+        None,
+        false,
+        false,
+    );
     let rels = tauri::async_runtime::spawn_blocking(move || mb::lookup_by_discid(&discid2))
         .await
         .map_err(|e| format!("任务失败: {e}"))??;
+
     if rels.is_empty() {
+        // DiscID 没收录时: 读取 MCN/ISRC, 先按条码再按 ISRC 找发行版
+        let Some(dev) = device else {
+            emit_identify(
+                &app,
+                "notfound",
+                "未能自动识别",
+                Some("DiscID 未收录，且没有可用的光驱设备信息。可以手动搜索专辑。".into()),
+                true,
+                false,
+            );
+            return Ok(None);
+        };
+        emit_identify(
+            &app,
+            "extra",
+            "读取光盘 MCN / ISRC…",
+            None,
+            false,
+            false,
+        );
+        let extras = tauri::async_runtime::spawn_blocking(move || toc::read_extras(&dev))
+            .await
+            .map_err(|e| format!("任务失败: {e}"))?;
+        let track_count = state.toc_durations.lock().unwrap().len();
+
+        if let Some(mcn) = extras.mcn.clone() {
+            emit_identify(
+                &app,
+                "barcode",
+                "按光盘条码搜索 MusicBrainz…",
+                Some(mcn.clone()),
+                false,
+                false,
+            );
+            let tc = if track_count > 0 { track_count } else { 1 };
+            let by_code = tauri::async_runtime::spawn_blocking(move || {
+                mb::resolve_by_barcode(&mcn, tc).ok().flatten()
+            })
+            .await
+            .map_err(|e| format!("任务失败: {e}"))?;
+            if let Some(full) = by_code {
+                if let Ok(v) = serde_json::to_value(&full) {
+                    state.library.lock().unwrap().put(&discid, &v);
+                }
+                emit_identify(
+                    &app,
+                    "done",
+                    "识别完成",
+                    Some(full.title.clone()),
+                    true,
+                    true,
+                );
+                return Ok(Some(serde_json::json!({ "release": full, "medium": 0 })));
+            }
+        }
+
+        let isrcs: Vec<String> = extras.isrcs.iter().map(|(_, s)| s.clone()).collect();
+        if !isrcs.is_empty() {
+            emit_identify(
+                &app,
+                "isrc",
+                "按 ISRC 搜索发行版…",
+                Some(format!("{} 个 ISRC", isrcs.len())),
+                false,
+                false,
+            );
+            let tc = if track_count > 0 { track_count } else { isrcs.len() };
+            let by_isrc = tauri::async_runtime::spawn_blocking(move || {
+                mb::resolve_by_isrcs(&isrcs, tc).ok().flatten()
+            })
+            .await
+            .map_err(|e| format!("任务失败: {e}"))?;
+            if let Some(full) = by_isrc {
+                if let Ok(v) = serde_json::to_value(&full) {
+                    state.library.lock().unwrap().put(&discid, &v);
+                }
+                emit_identify(
+                    &app,
+                    "done",
+                    "识别完成",
+                    Some(full.title.clone()),
+                    true,
+                    true,
+                );
+                return Ok(Some(serde_json::json!({ "release": full, "medium": 0 })));
+            }
+        }
+
+        let detail = if extras.mcn.is_none() && extras.isrcs.is_empty() {
+            "DiscID 未收录；也没有读到 MCN / ISRC。可能是自刻盘或 MusicBrainz 没有这张发行版，请用「搜索专辑」手动匹配。".to_string()
+        } else {
+            "DiscID 未收录；MCN / ISRC 也没能匹配到对应发行版。请用「搜索专辑」手动匹配。".to_string()
+        };
+        emit_identify(&app, "notfound", "未能自动识别", Some(detail), true, false);
         return Ok(None);
     }
+
     let best = mb::pick_release(&rels, None).ok_or("无候选")?;
+    emit_identify(
+        &app,
+        "release",
+        "读取发行版详情…",
+        Some(best.title.clone()),
+        false,
+        false,
+    );
     let full = tauri::async_runtime::spawn_blocking(move || mb::get_release(&best.id))
         .await
         .map_err(|e| format!("任务失败: {e}"))??;
     let v = serde_json::to_value(&full).map_err(|e| format!("序列化失败: {e}"))?;
     state.library.lock().unwrap().put(&discid, &v);
+    emit_identify(
+        &app,
+        "done",
+        "识别完成",
+        Some(full.title.clone()),
+        true,
+        true,
+    );
     Ok(Some(serde_json::json!({ "release": full, "medium": 0 })))
 }
 
@@ -211,7 +366,7 @@ fn open_url(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 封面管线: 缓存 -> CAA -> 网易云(落盘) -> data URL
+/// 封面管线: 缓存 -> 网易云(落盘) -> CAA -> data URL
 fn resolve_cover(
     release_id: &str,
     rg_id: Option<String>,
@@ -239,28 +394,33 @@ fn resolve_cover(
             return Some(d);
         }
     }
-    // 2) CAA
+    // 2) 网易云: 专辑名优先; 歌曲搜索只作为兜底
+    //    (单曲"知らない"同样匹配到歌曲, 歌曲所在专辑可能是 Stranger, 会拿错封面)
+    let mut netease_cover = netease::album_cover_url_by_album(title, artist).ok();
+    if netease_cover.is_none() {
+        if let Ok(songs) = netease::search(title, artist, None) {
+            if let Some(best) = songs.first() {
+                netease_cover = netease::album_cover_url(best.id).ok();
+            }
+        }
+    }
+    if let Some(u) = netease_cover {
+        if let Some((mime, bytes)) = netease_cover_bytes(Some(&u)) {
+            let ext = match mime.as_str() {
+                "image/png" => "png",
+                "image/webp" => "webp",
+                _ => "jpg",
+            };
+            let _ = std::fs::create_dir_all(dir);
+            let f = dir.join(format!("{label}-{label}.{ext}"));
+            let _ = std::fs::write(&f, &bytes);
+            return Some(format!("data:{mime};base64,{}", b64(&bytes)));
+        }
+    }
+    // 3) CAA (网易云没有时兜底)
     if let Ok(Some(path)) = cover::fetch(release_id, rg_id.as_deref(), dir, &label) {
         if let Some(d) = file_of(&path) {
             return Some(d);
-        }
-    }
-    // 3) 网易云 (落盘后返回)
-    if let Ok(songs) = netease::search(title, artist, None) {
-        if let Some(best) = songs.first() {
-            if let Ok(u) = netease::album_cover_url(best.id) {
-                if let Some((mime, bytes)) = netease_cover_bytes(Some(&u)) {
-                    let ext = match mime.as_str() {
-                        "image/png" => "png",
-                        "image/webp" => "webp",
-                        _ => "jpg",
-                    };
-                    let _ = std::fs::create_dir_all(dir);
-                    let f = dir.join(format!("{label}-{label}.{ext}"));
-                    let _ = std::fs::write(&f, &bytes);
-                    return Some(format!("data:{mime};base64,{}", b64(&bytes)));
-                }
-            }
         }
     }
     None
@@ -565,7 +725,11 @@ async fn library_cover(
                 }
             }
         }
-        // 2) 网易云: 用专辑名 + 歌手搜索拿专辑封面
+        // 2) 网易云: 优先按专辑名匹配 (单曲不能拿同组专辑的封面)
+        if let Ok(u) = netease::album_cover_url_by_album(&title, &artist) {
+            return Ok(netease_cover_data_url(Some(&u)));
+        }
+        // 3) 专辑名搜不到时退回歌曲搜索
         if let Ok(songs) = netease::search(&title, &artist, None) {
             if let Some(best) = songs.first() {
                 if let Ok(u) = netease::album_cover_url(best.id) {

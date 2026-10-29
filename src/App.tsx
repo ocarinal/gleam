@@ -10,6 +10,7 @@ import {
   mediaState,
   onDriveMedia,
   onEnded,
+  onIdentifyProgress,
   onProgress,
   openMbRelease,
   openMbSubmit,
@@ -22,6 +23,7 @@ import {
   librarySetMedium,
   saveCover,
   searchReleases,
+  type IdentifyProgress as IdentifyProgressData,
   type LyricsResult,
   type LyricSource,
   type Progress,
@@ -37,6 +39,7 @@ import { InfoView, SettingsView } from "./components/Views";
 import { LibraryView } from "./components/LibraryView";
 import { SearchPanel } from "./components/SearchPanel";
 import { ManualLyricsModal } from "./components/ManualLyricsModal";
+import { IdentifyProgress } from "./components/IdentifyProgress";
 
 type View = "home" | "playing" | "tracks" | "info" | "library" | "settings";
 
@@ -138,6 +141,9 @@ export default function App() {
   const [playing, setPlaying] = useState<{ no: number; title: string } | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [status, setStatus] = useState("");
+  const [identify, setIdentify] = useState<IdentifyProgressData | null>(null);
+  const [identifyHint, setIdentifyHint] = useState("");
+  const [retryingIdentify, setRetryingIdentify] = useState(false);
   const [volume, setVolume] = useState(80);
   const [shuffle, setShuffle] = useState(false);
   const [repeat, setRepeat] = useState<"off" | "all" | "one">("off");
@@ -205,20 +211,21 @@ export default function App() {
     // (旧缓存里 artistCredit 可能为空，用首曲名会搜到同名的其它歌手)
     const title = r.title || r.media?.[0]?.tracks?.[0]?.title || "";
     const artist = r.artistCredit?.map((a) => a.name).join(" / ") ?? "";
-    // 先用光盘库同款封面 (缓存/网易云, 快) 兜底, 避免 CAA 慢时首页空着
-    let quick: string | null = null;
+    // 光盘库封面路径 (缓存/网易云) 与列表保持一致, 优先使用, 避免 CAA 的
+    // release-group 图把单曲封面错成同组专辑封面 (例如 知らない -> Stranger)
     try {
-      quick = await libraryCover(r.id, title, artist);
-      if (quick) setCover(quick);
+      const quick = await libraryCover(r.id, title, artist);
+      if (quick) {
+        setCover(quick);
+        return;
+      }
     } catch {
-      /* ignore */
+      /* 继续走 CAA */
     }
     try {
-      const full = await fetchCover(r.id, r.releaseGroup?.id ?? null, title, artist);
-      if (full) setCover(full);
-      else if (!quick) setCover(null);
+      setCover(await fetchCover(r.id, r.releaseGroup?.id ?? null, title, artist));
     } catch {
-      if (!quick) setCover(null);
+      setCover(null);
     }
   }, []);
 
@@ -254,6 +261,26 @@ export default function App() {
     );
   }, [disc?.discid, disc?.trackCount]);
 
+  useEffect(() => {
+    const un = onIdentifyProgress((p) => {
+      setIdentify(p);
+      if (p.done && !p.ok) setIdentifyHint(p.detail || p.message);
+      if (p.done && p.ok) setIdentifyHint("");
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!identify?.done) return;
+    const t = setTimeout(
+      () => setIdentify(null),
+      identify.ok ? 1400 : 5200
+    );
+    return () => clearTimeout(t);
+  }, [identify]);
+
   const applyRelease = useCallback(
     async (r: Release) => {
       setRealRelease(r);
@@ -277,6 +304,14 @@ export default function App() {
     if (identifyingRef.current) return;
     identifyingRef.current = true;
     if (!playingRef.current) setView("home");
+    setIdentify({
+      stage: "toc",
+      message: "读取光盘目录…",
+      detail: null,
+      done: false,
+      ok: false,
+    });
+    setIdentifyHint("");
     setLoading(true);
     setRealRelease(null);
     setCover(null);
@@ -289,7 +324,7 @@ export default function App() {
       setDriveState("disc");
       setLoading(false); // 检测完成立即显示界面, 元数据在后台加载
       try {
-        const res = await resolveDisc(d.discid);
+        const res = await resolveDisc(d.discid, d.device);
         if (res) {
           if ((res.release.media?.length ?? 0) > 1) {
             setMediumIdx(res.medium);
@@ -297,18 +332,69 @@ export default function App() {
           await applyRelease(res.release);
         }
       } catch (e) {
-        setStatus(String(e).slice(0, 80));
+        const msg = String(e).slice(0, 160);
+        setStatus(msg);
+        setIdentify({
+          stage: "notfound",
+          message: "识别请求失败",
+          detail: msg,
+          done: true,
+          ok: false,
+        });
+        setIdentifyHint(msg);
       }
     } catch (e) {
+      const msg = String(e).slice(0, 160);
       setDisc(null);
       lastFailAt.current = Date.now();
       setDriveState((st) => (st === "disc" ? "empty" : st));
-      setStatus(String(e).slice(0, 120));
+      setStatus(msg);
+      setIdentify({
+        stage: "notfound",
+        message: "无法读取光盘",
+        detail: msg,
+        done: true,
+        ok: false,
+      });
+      setIdentifyHint(msg);
     } finally {
       setLoading(false);
       identifyingRef.current = false;
     }
   }, [applyRelease]);
+
+  const retryIdentify = useCallback(async () => {
+    if (!discRef.current || retryingIdentify) return;
+    const d = discRef.current;
+    setRetryingIdentify(true);
+    setIdentifyHint("");
+    setIdentify({
+      stage: "discid",
+      message: "重新查询 MusicBrainz DiscID…",
+      detail: null,
+      done: false,
+      ok: false,
+    });
+    try {
+      const res = await resolveDisc(d.discid, d.device);
+      if (res) {
+        if ((res.release.media?.length ?? 0) > 1) setMediumIdx(res.medium);
+        await applyRelease(res.release);
+      }
+    } catch (e) {
+      const msg = String(e).slice(0, 160);
+      setIdentifyHint(msg);
+      setIdentify({
+        stage: "notfound",
+        message: "重新匹配失败",
+        detail: msg,
+        done: true,
+        ok: false,
+      });
+    } finally {
+      setRetryingIdentify(false);
+    }
+  }, [retryingIdentify, applyRelease]);
 
   useEffect(() => {
     void identifyDisc();
@@ -722,6 +808,7 @@ export default function App() {
               release={release}
               playing={playing}
               onPlayTrack={playFromHome}
+              onSearch={() => setShowSearch(true)}
             />
           )}
 
@@ -808,6 +895,9 @@ export default function App() {
               cover={cover}
               onSearch={() => setShowSearch(true)}
               onMbSubmit={onMbSubmit}
+              onRetryIdentify={() => void retryIdentify()}
+              retrying={retryingIdentify}
+              hint={identifyHint}
               onMbOpen={() => {
                 if (release?.id) void openMbRelease(release.id);
               }}
@@ -838,7 +928,7 @@ export default function App() {
             />
           )}
 
-          {!loading && disc && view === "info" && showSearch && (
+          {!loading && disc && showSearch && (
             <SearchPanel
               onSearch={onSearch}
               onPick={onPick}
@@ -847,6 +937,8 @@ export default function App() {
           )}
           </div>
         </main>
+
+        {identify && <IdentifyProgress status={identify} />}
 
         {manualLyricsOpen && (
           <ManualLyricsModal

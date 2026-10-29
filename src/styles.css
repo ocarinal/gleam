@@ -2798,3 +2798,114 @@ button.group-row:hover .group-open { opacity: 1; }
   flex: none;
   opacity: .9;
 }
+
+/* 未识别页的识别诊断 */
+.unknown-diagnostic {
+  margin-top: 14px;
+  padding: 9px 11px;
+  border-left: 2px solid rgba(76,194,255,.55);
+  border-radius: 0 8px 8px 0;
+  background: rgba(76,194,255,.055);
+  color: rgba(255,255,255,.48);
+  font-size: 11px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+/* 光盘识别进度 HUD */
+.identify-hud {
+  position: fixed;
+  top: 22px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 1250;
+  width: min(560px, calc(100vw - 48px));
+  padding: 13px 16px 11px;
+  border-radius: 16px;
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(17,21,29,.95);
+  box-shadow: 0 22px 55px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.05);
+  backdrop-filter: blur(18px);
+  pointer-events: none;
+  animation: identify-in .22s cubic-bezier(.2,.8,.2,1) both;
+}
+.identify-hud.failed { border-color: rgba(255,120,110,.26); }
+.identify-top { display: flex; align-items: flex-start; gap: 12px; }
+.identify-spinner {
+  flex: none; width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.13);
+  border-top-color: var(--accent);
+  animation: identify-spin .8s linear infinite;
+  display: grid; place-items: center;
+  font-size: 10px; color: var(--accent); font-weight: 800;
+}
+.identify-spinner.settled {
+  animation: none;
+  border-color: rgba(76,194,255,.4);
+  background: rgba(76,194,255,.12);
+}
+.identify-hud.failed .identify-spinner.settled {
+  border-color: rgba(255,120,110,.4);
+  background: rgba(255,120,110,.12);
+  color: #ff8f86;
+}
+.identify-copy { min-width: 0; flex: 1; }
+.identify-msg {
+  color: rgba(255,255,255,.86);
+  font-size: 12px; font-weight: 600;
+  letter-spacing: .02em;
+}
+.identify-detail {
+  margin-top: 3px;
+  color: rgba(255,255,255,.38);
+  font-size: 10.5px; line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.identify-steps {
+  display: flex; align-items: center; gap: 7px;
+  margin: 10px 0 0 32px;
+  flex-wrap: wrap;
+}
+.identify-step {
+  display: flex; align-items: center; gap: 5px;
+  color: rgba(255,255,255,.22);
+  font-size: 9px; letter-spacing: .06em;
+  white-space: nowrap;
+}
+.identify-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: rgba(255,255,255,.14);
+  transition: background .2s;
+}
+.identify-step.active { color: rgba(255,255,255,.68); }
+.identify-step.active .identify-dot {
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(76,194,255,.65);
+}
+.identify-step.done { color: rgba(255,255,255,.4); }
+.identify-step.done .identify-dot { background: rgba(76,194,255,.55); }
+.identify-hud.failed .identify-step.done .identify-dot { background: rgba(255,120,110,.45); }
+@keyframes identify-spin { to { transform: rotate(360deg); } }
+@keyframes identify-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* 未识别 CD 时首页的直接搜索入口 */
+.home-identify-btn {
+  margin-top: 14px;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 8px 15px;
+  border-radius: 999px;
+  border: 1px solid rgba(76,194,255,.32);
+  background: rgba(76,194,255,.10);
+  color: var(--accent);
+  font: inherit; font-size: 11.5px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.home-identify-btn:hover {
+  background: rgba(76,194,255,.18);
+  border-color: rgba(76,194,255,.55);
+  color: #fff;
+}

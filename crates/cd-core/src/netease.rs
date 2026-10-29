@@ -188,3 +188,67 @@ pub fn candidate(
         lrc: ly.lrc,
     })
 }
+
+/// 按专辑名 + 歌手搜索专辑封面 (优先匹配专辑名, 避免单曲命中同组专辑)
+pub fn album_cover_url_by_album(album: &str, artist: &str) -> Result<String, String> {
+    let q = format!("{album} {artist}");
+    let url = format!(
+        "{NETEASE_API}/search/get/web?s={}&type=10&limit=10&offset=0",
+        enc(&q)
+    );
+    let v = get_json(&url)?;
+    let Some(items) = v
+        .get("result")
+        .and_then(|r| r.get("albums"))
+        .and_then(|a| a.as_array())
+    else {
+        return Err("网易云无专辑结果".into());
+    };
+    let na = norm(album);
+    let ta = norm(artist);
+    let mut best: Option<(i32, String)> = None;
+    for a in items {
+        let Some(name) = a.get("name").and_then(|x| x.as_str()) else {
+            continue;
+        };
+        let artists = a
+            .get("artists")
+            .and_then(|x| x.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.get("name").and_then(|n| n.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(" / ")
+            })
+            .unwrap_or_default();
+        let mut score = 0;
+        let nn = norm(name);
+        if nn == na {
+            score += 100;
+        } else if nn.contains(&na) || na.contains(&nn) {
+            score += 35;
+        } else {
+            score -= 20;
+        }
+        if !artist.is_empty() {
+            let nn = norm(&artists);
+            if nn == ta || nn.contains(&ta) || ta.contains(&nn) {
+                score += 40;
+            } else {
+                score -= 30;
+            }
+        }
+        let pic = a
+            .get("picUrl")
+            .and_then(|x| x.as_str())
+            .or_else(|| a.get("blurPicUrl").and_then(|x| x.as_str()))
+            .filter(|s| s.starts_with("http"));
+        if let Some(p) = pic {
+            if best.as_ref().map(|b| score > b.0).unwrap_or(true) {
+                best = Some((score, p.to_string()));
+            }
+        }
+    }
+    best.map(|(_, p)| p)
+        .ok_or_else(|| "网易云无专辑封面".to_string())
+}

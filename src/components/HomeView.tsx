@@ -13,12 +13,14 @@ export function HomeView({
   release,
   playing,
   onPlayTrack,
+  onSearch,
 }: {
   cover: string | null;
   disc: TocInfo;
   release: Release | null;
   playing: { no: number; title: string } | null;
   onPlayTrack: (no: number) => void;
+  onSearch?: () => void;
 }) {
   const tracks = release?.media?.[0]?.tracks ?? [];
   const album = release?.title ?? "音频 CD";
@@ -50,6 +52,11 @@ export function HomeView({
             {year ? `${year} · ` : ""}
             {count} 首曲目
           </div>
+          {!release && onSearch ? (
+            <button className="home-identify-btn" onClick={onSearch}>
+              ⌕ 搜索专辑
+            </button>
+          ) : null}
         </div>
       </div>
 

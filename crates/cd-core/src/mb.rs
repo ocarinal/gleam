@@ -156,6 +156,123 @@ pub fn get_release(id: &str) -> Result<Release, String> {
     serde_json::from_value(v).map_err(|e| format!("解析失败: {e}"))
 }
 
+/// DiscID 未收录时: 用光盘 MCN 条码在 MusicBrainz 搜索发行版
+pub fn resolve_by_barcode(mcn: &str, track_count: usize) -> Result<Option<Release>, String> {
+    if mcn.trim().is_empty() || track_count == 0 {
+        return Ok(None);
+    }
+    let query = format!("barcode:{mcn}");
+    let v = mb_get("/release", &[("query", &query), ("limit", "6"), ("fmt", "json")])?;
+    let Some(items) = v.get("releases").and_then(|r| r.as_array()) else {
+        return Ok(None);
+    };
+    let mut best: Option<(i32, Release)> = None;
+    for stub in items.iter().take(6) {
+        let Some(id) = stub.get("id").and_then(|x| x.as_str()) else {
+            continue;
+        };
+        let Ok(full) = get_release(id) else {
+            continue;
+        };
+        let tc = full
+            .media
+            .as_ref()
+            .and_then(|m| m.first())
+            .and_then(|m| m.track_count)
+            .map(|n| n as usize)
+            .unwrap_or(0);
+        let score = if tc == track_count { 1000 } else { -(tc.abs_diff(track_count) as i32) };
+        if best.as_ref().map(|b| score > b.0).unwrap_or(true) {
+            best = Some((score, full));
+        }
+        if score >= 1000 {
+            break;
+        }
+    }
+    Ok(best.and_then(|(score, r)| if score >= 1000 { Some(r) } else { None }))
+}
+
+/// DiscID 未收录时: 用 ISRC -> recording -> releases, 选与音轨数一致的发行版
+pub fn resolve_by_isrcs(isrcs: &[String], track_count: usize) -> Result<Option<Release>, String> {
+    if isrcs.is_empty() || track_count == 0 {
+        return Ok(None);
+    }
+    // 最多取前 3 个 ISRC, 避免未知盘识别拖太久
+    for isrc in isrcs.iter().take(3) {
+        let v = match mb_get(
+            &format!("/isrc/{}", urlencode(isrc)),
+            &[("fmt", "json"), ("inc", "artist-credits")],
+        ) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let Some(recordings) = v.get("recordings").and_then(|r| r.as_array()) else {
+            continue;
+        };
+        for rec in recordings.iter().take(2) {
+            let Some(rid) = rec.get("id").and_then(|x| x.as_str()) else {
+                continue;
+            };
+            let rv = match mb_get(
+                &format!("/recording/{}", urlencode(rid)),
+                &[("fmt", "json"), ("inc", "releases+artist-credits")],
+            ) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let Some(releases) = rv.get("releases").and_then(|r| r.as_array()) else {
+                continue;
+            };
+            let mut best: Option<(i32, Release)> = None;
+            for stub in releases.iter().take(6) {
+                let Some(id) = stub.get("id").and_then(|x| x.as_str()) else {
+                    continue;
+                };
+                let Ok(full) = get_release(id) else {
+                    continue;
+                };
+                let tc = full
+                    .media
+                    .as_ref()
+                    .and_then(|m| m.first())
+                    .and_then(|m| m.track_count)
+                    .map(|n| n as usize)
+                    .or_else(|| {
+                        full.media
+                            .as_ref()
+                            .and_then(|m| m.first())
+                            .and_then(|m| m.tracks.as_ref())
+                            .map(|t| t.len())
+                    })
+                    .unwrap_or(0);
+                let score = if tc == track_count {
+                    1000
+                } else {
+                    -(tc.abs_diff(track_count) as i32)
+                };
+                let score = score
+                    + if full.status.as_deref() == Some("Official") {
+                        20
+                    } else {
+                        0
+                    };
+                if best.as_ref().map(|b| score > b.0).unwrap_or(true) {
+                    best = Some((score, full));
+                }
+                if score >= 1000 {
+                    break;
+                }
+            }
+            if let Some((score, full)) = best {
+                if score >= 1000 {
+                    return Ok(Some(full));
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// 按 状态/格式/国别/轨数 打分选最优
 pub fn pick_release(releases: &[Release], expect_tracks: Option<u32>) -> Option<Release> {
     let score = |r: &Release| -> i32 {

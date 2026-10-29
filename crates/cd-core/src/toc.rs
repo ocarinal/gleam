@@ -187,3 +187,51 @@ pub fn auto_device() -> Result<String, String> {
     }
     Err("未发现光驱".into())
 }
+
+/// 光盘附加信息: MCN 条码 + 每轨 ISRC (用于 DiscID 未收录时的兜底识别)
+#[derive(Default, Clone, Debug)]
+pub struct DiscExtras {
+    pub mcn: Option<String>,
+    pub isrcs: Vec<(u8, String)>,
+}
+
+/// 通过 cd-info (libcdio) 读取 MCN / ISRC。
+/// 没有安装 cd-info 时返回空, 不影响正常流程。
+pub fn read_extras(device: &str) -> DiscExtras {
+    let mut extras = DiscExtras::default();
+    let out = std::process::Command::new("cd-info")
+        .args(["--no-device-info", device])
+        .env("LC_ALL", "C")
+        .output();
+    let Ok(out) = out else {
+        return extras;
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let meaningful = |s: &str| s.chars().any(|c| c.is_ascii_alphanumeric() && c != '0');
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with("Media Catalog Number") {
+            if let Some((_, v)) = line.split_once(':') {
+                let v = v.trim().to_string();
+                if v.len() >= 8 && meaningful(&v) {
+                    extras.mcn = Some(v);
+                }
+            }
+            continue;
+        }
+        if let Some(pos) = line.find("ISRC:") {
+            let left = &line[..pos];
+            let track = left
+                .split_whitespace()
+                .nth(1)
+                .and_then(|n| n.parse::<u8>().ok());
+            let isrc = line[pos + 5..].trim().to_string();
+            if let (Some(t), true) = (track, isrc.len() >= 10 && meaningful(&isrc)) {
+                if !extras.isrcs.iter().any(|(_, x)| x == &isrc) {
+                    extras.isrcs.push((t, isrc));
+                }
+            }
+        }
+    }
+    extras
+}
