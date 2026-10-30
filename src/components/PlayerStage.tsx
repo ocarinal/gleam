@@ -99,6 +99,7 @@ export function PlayerStage({
   lyrics,
   lyricsSource,
   lyricsOnly,
+  instrumental = false,
   onPrev,
   onTogglePause,
   onNext,
@@ -123,6 +124,7 @@ export function PlayerStage({
   lyrics: LrcLine[];
   lyricsSource: string;
   lyricsOnly: boolean;
+  instrumental?: boolean;
   onPrev: () => void;
   onTogglePause: () => void;
   onNext: () => void;
@@ -162,6 +164,7 @@ export function PlayerStage({
               onSeek={(t) => onSeek(t + (progress?.start ?? 0))}
               onRetry={onRetryLyrics}
               idle={playing ? undefined : `当前CD · ${title}`}
+              instrumental={instrumental}
               paused={paused}
               onContextMenu={openLyricMenu}
               onManualSearch={onManualLyrics}
@@ -185,6 +188,7 @@ export function PlayerStage({
                   onSeek={(t) => onSeek(t + (progress?.start ?? 0))}
                   onRetry={onRetryLyrics}
                   idle={playing ? undefined : `当前CD · ${title}`}
+                  instrumental={instrumental}
                   paused={paused}
                   onContextMenu={openLyricMenu}
                   onManualSearch={onManualLyrics}

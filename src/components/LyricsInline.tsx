@@ -94,6 +94,7 @@ export function LyricsInline({
   onSeek,
   onRetry,
   idle,
+  instrumental = false,
   paused = false,
   onContextMenu,
   onManualSearch,
@@ -104,6 +105,7 @@ export function LyricsInline({
   onSeek: (t: number) => void;
   onRetry?: () => void;
   idle?: string;
+  instrumental?: boolean;
   paused?: boolean;
   onContextMenu?: (e: React.MouseEvent) => void;
   onManualSearch?: () => void;
@@ -161,6 +163,14 @@ export function LyricsInline({
   }, [cur]);
 
   if (lines.length === 0) {
+    if (instrumental) {
+      return (
+        <div className="li-none li-instrumental" onContextMenu={onContextMenu}>
+          <div className="li-instrumental-main">纯音乐</div>
+          <div className="li-instrumental-sub">请欣赏</div>
+        </div>
+      );
+    }
     if (idle) {
       return (
         <div className="li-none li-idle" onContextMenu={onContextMenu}>

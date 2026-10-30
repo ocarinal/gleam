@@ -74,7 +74,7 @@ pub struct Release {
 fn get_json(url: &str) -> Result<serde_json::Value, String> {
     let mut last_err = String::new();
     for i in 0..3 {
-        match ureq::get(url)
+        match crate::http::get(url)
             .set("User-Agent", USER_AGENT)
             .set("Accept", "application/json")
             .timeout(Duration::from_secs(25))

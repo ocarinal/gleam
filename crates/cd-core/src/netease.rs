@@ -31,7 +31,7 @@ pub struct NeteaseAlbum {
 }
 
 fn get_json(url: &str) -> Result<serde_json::Value, String> {
-    ureq::get(url)
+    crate::http::get(url)
         .set("User-Agent", "Mozilla/5.0")
         .set("Referer", "https://music.163.com")
         .timeout(Duration::from_secs(8))

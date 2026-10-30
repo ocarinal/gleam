@@ -37,7 +37,7 @@ pub fn search(title: &str, artist: &str, length_ms: Option<u64>) -> Result<Vec<L
     if let Some(ms) = length_ms {
         url.push_str(&format!("&duration={}", (ms as f64 / 1000.0).round() as u64));
     }
-    let resp = ureq::get(&url)
+    let resp = crate::http::get(&url)
         .set("User-Agent", crate::USER_AGENT)
         .timeout(Duration::from_secs(8))
         .call()

@@ -29,7 +29,7 @@ fn parse_body(body: &str) -> Option<serde_json::Value> {
 }
 
 fn get_json(url: &str) -> Option<serde_json::Value> {
-    let resp = ureq::get(url)
+    let resp = crate::http::get(url)
         .set("User-Agent", "Mozilla/5.0")
         .set("Referer", "https://y.qq.com/")
         .timeout(Duration::from_secs(5))

@@ -1108,6 +1108,10 @@ export default function App() {
   const curTitle =
     playing?.title ?? release?.title ?? (disc ? "点击曲目开始播放" : "");
   const curArtist = artists(release);
+  const instrumental =
+    /(instrumental|inst\.?\b|off[\s-]?vocal|karaoke|纯音乐|純音樂|伴奏|オフボーカル|インスト|カラオケ)/i.test(
+      curTitle
+    );
 
   // WebKit 连续快速切页时可能残留旧的合成层; 切页后强制失效侧栏图层
   useEffect(() => {
@@ -1315,6 +1319,7 @@ export default function App() {
                 lyrics={lrcLines}
                 lyricsSource={lrcSource}
                 lyricsOnly={lyricsOnly}
+                instrumental={instrumental}
                 onPrev={onPrev}
                 onTogglePause={onTogglePause}
                 onNext={onNext}

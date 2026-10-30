@@ -6,6 +6,7 @@ pub mod discid;
 pub mod kugou;
 pub mod library;
 pub mod lrclib;
+pub mod http;
 pub mod lyrics;
 pub mod mb;
 pub mod meta;

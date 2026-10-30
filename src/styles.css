@@ -4662,3 +4662,19 @@ button.group-row:hover .group-open { opacity: 1; }
 .identify-hud.failed {
   border-color: rgba(255,120,110,.30) !important;
 }
+
+/* 纯音乐曲目: 不再显示“无歌词” */
+.li-instrumental {
+  gap: 7px;
+  color: rgba(255,255,255,.86);
+}
+.li-instrumental-main {
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: .18em;
+}
+.li-instrumental-sub {
+  font-size: 12px;
+  color: rgba(255,255,255,.42);
+  letter-spacing: .32em;
+}

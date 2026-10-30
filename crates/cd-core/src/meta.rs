@@ -23,7 +23,7 @@ pub struct AlbumExtra {
 }
 
 fn get_json(url: &str) -> Result<Value, String> {
-    ureq::get(url)
+    crate::http::get(url)
         .set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64)")
         .set("Referer", "https://music.163.com")
         .timeout(Duration::from_secs(10))
@@ -247,7 +247,7 @@ fn qq_album_desc(album: &str, artist: &str) -> Option<(String, Option<String>)> 
         "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=6&w={}&format=json",
         enc(&q)
     );
-    let v = ureq::get(&search)
+    let v = crate::http::get(&search)
         .set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64)")
         .set("Referer", "https://y.qq.com/")
         .timeout(Duration::from_secs(10))
@@ -285,7 +285,7 @@ fn qq_album_desc(album: &str, artist: &str) -> Option<(String, Option<String>)> 
     let url = format!(
         "https://c.y.qq.com/v8/fcg-bin/fcg_v8_album_info_cp.fcg?albummid={mid}&format=json"
     );
-    let v = ureq::get(&url)
+    let v = crate::http::get(&url)
         .set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64)")
         .set("Referer", "https://y.qq.com/")
         .timeout(Duration::from_secs(10))

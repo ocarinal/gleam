@@ -172,6 +172,7 @@ pub fn collect(
 
     let deadline = Instant::now() + Duration::from_secs(12);
     let mut best: Option<Candidate> = None;
+    let mut responded = 0usize;
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
@@ -179,7 +180,11 @@ pub fn collect(
         }
         match rx.recv_timeout(left) {
             Ok(Some(c)) => {
+                responded += 1;
                 if c.lrc.trim().is_empty() {
+                    if responded >= 4 {
+                        break;
+                    }
                     continue;
                 }
                 let better = best
@@ -192,8 +197,20 @@ pub fn collect(
                 if c.rank().0 >= 130 {
                     break; // 双语逐字，最高优先级，不再等其它源
                 }
+                // 已经有双语结果且至少两个源响应，不必再等慢源
+                if responded >= 2 && best.as_ref().map(|b| b.rank().0 >= 120).unwrap_or(false) {
+                    break;
+                }
+                if responded >= 4 {
+                    break;
+                }
             }
-            Ok(None) => {}
+            Ok(None) => {
+                responded += 1;
+                if responded >= 4 {
+                    break;
+                }
+            }
             Err(_) => break,
         }
     }

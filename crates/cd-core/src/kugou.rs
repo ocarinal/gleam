@@ -31,7 +31,7 @@ fn enc(s: &str) -> String {
 }
 
 fn get_json(url: &str) -> Option<Value> {
-    ureq::get(url)
+    crate::http::get(url)
         .set("User-Agent", "Mozilla/5.0")
         .timeout(Duration::from_secs(5))
         .call()

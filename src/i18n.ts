@@ -110,6 +110,8 @@ const EN: Record<string, string> = {
   "QQ 音乐": "QQ Music",
   "在 MusicBrainz 查看 ↗": "View on MusicBrainz ↗",
   "暂无歌词": "No lyrics",
+  "纯音乐": "Instrumental",
+  "请欣赏": "Enjoy",
   "默认 (慧心)": "Default (Huixin)",
   "标准": "Standard",
   "大号": "Large",

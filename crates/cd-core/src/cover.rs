@@ -72,7 +72,7 @@ fn read_image_body(resp: ureq::Response) -> Result<Vec<u8>, String> {
 
 /// 从网络读取一张完整图片
 pub fn download_image(url: &str, timeout: Duration) -> Result<Vec<u8>, String> {
-    let resp = ureq::get(url)
+    let resp = crate::http::get(url)
         .set("User-Agent", crate::USER_AGENT)
         .timeout(timeout)
         .call()
@@ -133,7 +133,7 @@ pub fn fetch(
 
     std::fs::create_dir_all(out_dir).map_err(|e| format!("无法创建封面目录: {e}"))?;
     for url in tries {
-        match ureq::get(&url)
+        match crate::http::get(&url)
             .set("User-Agent", crate::USER_AGENT)
             .timeout(Duration::from_secs(15))
             .call()
