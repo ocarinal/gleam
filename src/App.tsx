@@ -215,6 +215,7 @@ export default function App() {
   const [lyricsOnly, setLyricsOnly] = useState(false);
   const [lrcLines, setLrcLines] = useState<LrcLine[]>([]);
   const [lrcSource, setLrcSource] = useState("");
+  const [lrcInstrumental, setLrcInstrumental] = useState(false);
   const [lyricSourceMode, setLyricSourceMode] = useState<LyricSource>(readLyricSource);
   const [manualLyricsOpen, setManualLyricsOpen] = useState(false);
   const [coverDetail, setCoverDetail] = useState<{ origin?: CoverRect } | null>(null);
@@ -450,6 +451,7 @@ export default function App() {
     setPlaying(null);
     setProgress(null);
     setLrcLines([]);
+    setLrcInstrumental(false);
     setView("home");
   }, []);
 
@@ -469,6 +471,7 @@ export default function App() {
     setRealRelease(null);
     setCover(null);
     setLrcLines([]);
+    setLrcInstrumental(false);
     setShowSearch(false);
     setProgress(null);
     try {
@@ -673,16 +676,19 @@ export default function App() {
     if (!autoLyricsRef.current) {
       setLrcLines([]);
       setLrcSource("");
+      setLrcInstrumental(false);
       return;
     }
     // 切歌先清空 + 请求编号 (过期结果丢弃)
     const reqId = ++lyricReq.current;
     setLrcLines([]);
     setLrcSource("正在搜索歌词源…");
-    const finish = (lines: LrcLine[], source: string) => {
+    setLrcInstrumental(false);
+    const finish = (lines: LrcLine[], source: string, instrumental = false) => {
       if (lyricReq.current !== reqId) return;
       setLrcLines(lines);
       setLrcSource(source);
+      setLrcInstrumental(instrumental);
     };
     const mt = release?.media?.[0]?.tracks?.[no - 1];
     if (!mt) {
@@ -692,8 +698,12 @@ export default function App() {
     // 手动查找并保存过的歌词: 自动模式下直接命中, 不再联网
     if (source === "auto") {
       const saved = readManualLyrics()[lyricCacheKey(mt.title, artists(release), mt.length)];
-      if (saved?.lrc?.trim()) {
-        finish(parseLrc(saved.lrc, saved.tlyric), saved.source || "手动歌词");
+      if (saved?.lrc?.trim() || saved?.instrumental) {
+        if (saved.instrumental && !saved.lrc?.trim()) {
+          finish([], "", true);
+        } else {
+          finish(parseLrc(saved.lrc, saved.tlyric), saved.source || "手动歌词", saved.instrumental ?? false);
+        }
         return;
       }
     }
@@ -710,9 +720,13 @@ export default function App() {
       );
       clearTimeout(timer);
       if (!lr.lrc.trim()) {
-        finish([], lr.source || "无歌词");
+        if (lr.instrumental) {
+          finish([], "", true);
+        } else {
+          finish([], lr.source || "无歌词");
+        }
       } else {
-        finish(parseLrc(lr.lrc, lr.tlyric), lr.source);
+        finish(parseLrc(lr.lrc, lr.tlyric), lr.source, lr.instrumental);
       }
       if (lr.cover) setCover((c) => c ?? lr.cover);
     } catch {
@@ -746,7 +760,13 @@ export default function App() {
         "auto"
       );
       if (lyricReq.current !== reqId) return false;
-      if (!lr.lrc.trim()) return false;
+      if (!lr.lrc.trim() && !lr.instrumental) return false;
+      if (lr.instrumental && !lr.lrc.trim()) {
+        setLrcLines([]);
+        setLrcSource("");
+        setLrcInstrumental(true);
+        return true;
+      }
       const saved: LyricsResult = {
         ...lr,
         source: `手动 · ${lr.source}`,
@@ -757,6 +777,7 @@ export default function App() {
       );
       setLrcLines(parseLrc(saved.lrc, saved.tlyric));
       setLrcSource(saved.source);
+      setLrcInstrumental(false);
       return true;
     } catch {
       return false;
@@ -1319,7 +1340,7 @@ export default function App() {
                 lyrics={lrcLines}
                 lyricsSource={lrcSource}
                 lyricsOnly={lyricsOnly}
-                instrumental={instrumental}
+                instrumental={instrumental || lrcInstrumental}
                 onPrev={onPrev}
                 onTogglePause={onTogglePause}
                 onNext={onNext}

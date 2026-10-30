@@ -49,6 +49,7 @@ struct LyricsResult {
     cover: Option<String>,
     bilingual: bool,
     word_timed: bool,
+    instrumental: bool,
 }
 
 fn cache_dir() -> PathBuf {
@@ -562,6 +563,7 @@ async fn fetch_lyrics(
         };
         let bilingual = best.as_ref().map(|c| c.bilingual()).unwrap_or(false);
         let word_timed = best.as_ref().map(|c| c.word_timed).unwrap_or(false);
+        let instrumental = best.as_ref().map(|c| c.instrumental).unwrap_or(false);
 
         // 诊断日志
         let line = format!(
@@ -593,6 +595,7 @@ async fn fetch_lyrics(
                 cover: None,
                 bilingual,
                 word_timed,
+                instrumental,
             }),
             None => Ok(LyricsResult {
                 lrc: String::new(),
@@ -602,6 +605,7 @@ async fn fetch_lyrics(
                 cover: None,
                 bilingual: false,
                 word_timed: false,
+                instrumental: false,
             }),
         }
     })

@@ -126,6 +126,7 @@ pub fn album_cover_url(song_id: u64) -> Result<String, String> {
 pub struct NeteaseLyrics {
     pub lrc: String,
     pub tlyric: Option<String>,
+    pub pure_music: bool,
 }
 
 /// 获取同步歌词 (LRC) + 翻译
@@ -134,20 +135,24 @@ pub fn fetch_lyrics(song_id: u64) -> Result<NeteaseLyrics, String> {
         "{NETEASE_API}/song/lyric?id={song_id}&lv=1&kv=1&tv=-1"
     );
     let v = get_json(&url)?;
+    let pure_music = v.get("pureMusic").and_then(|b| b.as_bool()).unwrap_or(false);
     let lrc = v
         .get("lrc")
         .and_then(|l| l.get("lyric"))
         .and_then(|l| l.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "网易云无歌词".to_string())?;
+        .unwrap_or_default();
+    if lrc.trim().is_empty() && !pure_music {
+        return Err("网易云无歌词".to_string());
+    }
     let tlyric = v
         .get("tlyric")
         .and_then(|t| t.get("lyric"))
         .and_then(|t| t.as_str())
         .map(|s| s.to_string())
         .filter(|s| !s.trim().is_empty());
-    Ok(NeteaseLyrics { lrc, tlyric })
+    Ok(NeteaseLyrics { lrc, tlyric, pure_music })
 }
 
 /// 多源聚合用的统一候选
@@ -166,7 +171,7 @@ pub fn candidate(
         None => songs.first()?,
     };
     let ly = fetch_lyrics(b.id).ok()?;
-    if ly.lrc.trim().is_empty() {
+    if ly.lrc.trim().is_empty() && !ly.pure_music {
         return None;
     }
     let arts = b
@@ -186,6 +191,7 @@ pub fn candidate(
         word_timed: crate::lyrics::has_word_tags(&ly.lrc),
         tlyric: ly.tlyric.filter(|t| !t.trim().is_empty()),
         lrc: ly.lrc,
+        instrumental: ly.pure_music,
     })
 }
 

@@ -14,6 +14,7 @@ pub struct Candidate {
     pub tlyric: Option<String>,
     pub synced: bool,
     pub word_timed: bool,
+    pub instrumental: bool,
 }
 
 impl Candidate {
@@ -129,6 +130,22 @@ pub fn duration_ok(seconds: Option<f64>, length_ms: Option<u64>, tol: f64) -> bo
     }
 }
 
+/// 某些源把纯音乐写成一行占位歌词 (如“纯音乐，请欣赏”), 判为纯音乐并丢弃占位行。
+pub fn instrumental_text(lrc: &str) -> bool {
+    let compact: String = lrc.chars().filter(|c| !c.is_whitespace()).collect();
+    if compact.is_empty() || compact.chars().count() > 320 {
+        return false;
+    }
+    let lower = compact.to_lowercase();
+    [
+        "纯音乐", "純音樂", "请欣赏", "請欣賞", "没有填词", "沒有填詞",
+        "无填词", "無人聲", "无人声", "此歌曲为纯音乐", "此歌曲為純音樂",
+        "instrumental", "offvocal", "off-vocal",
+    ]
+    .iter()
+    .any(|k| lower.contains(k))
+}
+
 /// 并行查询所有源，按优先级返回最佳候选。
 /// 12 秒硬截止；一旦出现"双语逐字"立即返回。
 pub fn collect(
@@ -172,6 +189,7 @@ pub fn collect(
 
     let deadline = Instant::now() + Duration::from_secs(12);
     let mut best: Option<Candidate> = None;
+    let mut instrumental = false;
     let mut responded = 0usize;
     loop {
         let left = deadline.saturating_duration_since(Instant::now());
@@ -179,8 +197,20 @@ pub fn collect(
             break;
         }
         match rx.recv_timeout(left) {
-            Ok(Some(c)) => {
+            Ok(Some(mut c)) => {
                 responded += 1;
+                if instrumental_text(&c.lrc) {
+                    c.instrumental = true;
+                    c.lrc.clear();
+                    c.tlyric = None;
+                }
+                if c.instrumental {
+                    instrumental = true;
+                    if responded >= 4 {
+                        break;
+                    }
+                    continue;
+                }
                 if c.lrc.trim().is_empty() {
                     if responded >= 4 {
                         break;
@@ -215,6 +245,13 @@ pub fn collect(
         }
     }
 
+    if best.is_none() && instrumental {
+        return Some(Candidate {
+            source: "纯音乐".into(),
+            instrumental: true,
+            ..Candidate::default()
+        });
+    }
     best.map(|c| c.with_quality_label())
 }
 
@@ -233,7 +270,13 @@ pub fn collect_one(
         "kugou" => crate::kugou::candidate(title, artist, length_ms),
         _ => None,
     }?;
-    if c.lrc.trim().is_empty() {
+    let mut c = c;
+    if instrumental_text(&c.lrc) {
+        c.instrumental = true;
+        c.lrc.clear();
+        c.tlyric = None;
+    }
+    if c.lrc.trim().is_empty() && !c.instrumental {
         return None;
     }
     Some(c.with_quality_label())

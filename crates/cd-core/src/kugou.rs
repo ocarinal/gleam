@@ -357,6 +357,7 @@ pub fn candidate(title: &str, artist: &str, length_ms: Option<u64>) -> Option<Ca
             word_timed,
             lrc,
             tlyric,
+            instrumental: false,
         });
     }
 
@@ -376,5 +377,6 @@ pub fn candidate(title: &str, artist: &str, length_ms: Option<u64>) -> Option<Ca
         word_timed: crate::lyrics::has_word_tags(&lrc),
         lrc,
         tlyric: None,
+        instrumental: false,
     })
 }

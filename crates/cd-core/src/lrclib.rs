@@ -114,11 +114,13 @@ pub fn candidate(
     if !mid_ok && !crate::lyrics::duration_ok(p.duration, length_ms, 6.0) {
         return None;
     }
+    let instrumental = p.instrumental.unwrap_or(false);
     let lrc = p
         .synced_lyrics
         .clone()
-        .or_else(|| p.plain_lyrics.clone())?;
-    if lrc.trim().is_empty() {
+        .or_else(|| p.plain_lyrics.clone())
+        .unwrap_or_default();
+    if lrc.trim().is_empty() && !instrumental {
         return None;
     }
     let source = match p.artist_name.as_deref().filter(|s| !s.trim().is_empty()) {
@@ -131,5 +133,6 @@ pub fn candidate(
         word_timed: crate::lyrics::has_word_tags(&lrc),
         lrc,
         tlyric: None,
+        instrumental,
     })
 }

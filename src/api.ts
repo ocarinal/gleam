@@ -52,6 +52,7 @@ export interface LyricsResult {
   cover: string | null;
   bilingual: boolean;
   wordTimed: boolean;
+  instrumental: boolean;
 }
 
 export type LyricSource = "auto" | "lrclib" | "netease" | "qq" | "kugou";
