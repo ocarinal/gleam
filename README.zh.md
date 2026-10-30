@@ -6,7 +6,7 @@
 
 插入光盘后，Gleam 读取 TOC，从 MusicBrainz 获取发行信息，再加载封面、专辑介绍和歌词。识别过的光盘会保存在本地，下次插入直接使用。
 
-**当前版本：** [v1.1.0](https://github.com/ocarinal/gleam/releases/tag/v1.1.0) · [更新日志](CHANGELOG.md)
+**当前版本：** [v1.1.0 Bug Fixes (2026-10-31)](https://github.com/ocarinal/gleam/releases/tag/v1.1.0-bugfix-2026-10-31) · [更新日志](CHANGELOG.md)
 
 ## 界面
 

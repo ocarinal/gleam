@@ -6,7 +6,7 @@ A physical CD player for Linux, built with Tauri 2, React and libmpv.
 
 Insert a disc and Gleam reads its TOC, looks up the release on MusicBrainz, then fetches artwork, album information and lyrics. Recognized discs are stored locally, so the next insertion is instant.
 
-**Latest release:** [v1.1.0](https://github.com/ocarinal/gleam/releases/tag/v1.1.0) · [Changelog](CHANGELOG.md)
+**Latest release:** [v1.1.0 Bug Fixes (2026-10-31)](https://github.com/ocarinal/gleam/releases/tag/v1.1.0-bugfix-2026-10-31) · [Changelog](CHANGELOG.md)
 
 ## Screenshots
 
