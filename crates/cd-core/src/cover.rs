@@ -128,7 +128,8 @@ pub fn fetch(
         format!("{CAA_API}/release/{release_id}/front-250"),
     ];
     if let Some(rg) = rg_id {
-        tries.insert(0, format!("{CAA_API}/release-group/{rg}/front-500"));
+        // release-group 图可能属于同组其它版本 (例如单曲拿到专辑封面), 放最后
+        tries.push(format!("{CAA_API}/release-group/{rg}/front-500"));
     }
 
     std::fs::create_dir_all(out_dir).map_err(|e| format!("无法创建封面目录: {e}"))?;

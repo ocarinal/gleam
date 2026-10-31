@@ -136,13 +136,35 @@ pub fn lookup_by_discid(discid: &str) -> Result<Vec<Release>, String> {
     Ok(serde_json::from_value(releases).unwrap_or_default())
 }
 
-pub fn search_releases(query: &str) -> Result<Vec<Release>, String> {
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ReleasePage {
+    pub releases: Vec<Release>,
+    pub count: usize,
+    pub offset: usize,
+    pub limit: usize,
+}
+
+pub fn search_releases(query: &str, offset: usize, limit: usize) -> Result<ReleasePage, String> {
+    let limit = limit.clamp(1, 100);
+    let offset_s = offset.to_string();
+    let limit_s = limit.to_string();
     let v = mb_get(
         "/release",
-        &[("query", query), ("limit", "8"), ("fmt", "json")],
+        &[
+            ("query", query),
+            ("limit", &limit_s),
+            ("offset", &offset_s),
+            ("fmt", "json"),
+        ],
     )?;
-    let releases = v.get("releases").cloned().unwrap_or(serde_json::Value::Null);
-    Ok(serde_json::from_value(releases).unwrap_or_default())
+    let count = v.get("count").and_then(|x| x.as_u64()).unwrap_or(0) as usize;
+    let releases = v
+        .get("releases")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let releases: Vec<Release> = serde_json::from_value(releases).unwrap_or_default();
+    let count = if count == 0 { releases.len() } else { count };
+    Ok(ReleasePage { releases, count, offset, limit })
 }
 
 pub fn get_release(id: &str) -> Result<Release, String> {

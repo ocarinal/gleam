@@ -4678,3 +4678,13 @@ button.group-row:hover .group-open { opacity: 1; }
   color: rgba(255,255,255,.42);
   letter-spacing: .32em;
 }
+
+.search-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 14px 0 8px;
+  color: rgba(255,255,255,.34);
+  font-size: 11px;
+}

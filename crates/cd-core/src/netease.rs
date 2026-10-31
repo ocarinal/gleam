@@ -212,7 +212,7 @@ pub fn album_cover_url_by_album(album: &str, artist: &str) -> Result<String, Str
     };
     let na = norm(album);
     let ta = norm(artist);
-    let mut best: Option<(i32, String)> = None;
+    let mut best: Option<(i32, i32, String)> = None;
     for a in items {
         let Some(name) = a.get("name").and_then(|x| x.as_str()) else {
             continue;
@@ -250,11 +250,17 @@ pub fn album_cover_url_by_album(album: &str, artist: &str) -> Result<String, Str
             .or_else(|| a.get("blurPicUrl").and_then(|x| x.as_str()))
             .filter(|s| s.starts_with("http"));
         if let Some(p) = pic {
-            if best.as_ref().map(|b| score > b.0).unwrap_or(true) {
-                best = Some((score, p.to_string()));
+            // 同分时优先标题长度接近的结果, 处理「フィルム」→ FILM / Stranger 这类译名
+            let dist = (nn.chars().count() as i32 - na.chars().count() as i32).abs();
+            if best
+                .as_ref()
+                .map(|b| (score, -dist) > (b.0, b.1))
+                .unwrap_or(true)
+            {
+                best = Some((score, -dist, p.to_string()));
             }
         }
     }
-    best.map(|(_, p)| p)
+    best.map(|(_, _, p)| p)
         .ok_or_else(|| "网易云无专辑封面".to_string())
 }

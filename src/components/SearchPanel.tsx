@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Release } from "../api";
+import type { Release, ReleasePage } from "../api";
 
 /** 搜索专辑: 居中模态框 (替代原来贴在底部的裸输入框) */
 export function SearchPanel({
@@ -8,14 +8,20 @@ export function SearchPanel({
   onPick,
   onClose,
 }: {
-  onSearch: (q: string) => Promise<Release[]>;
+  onSearch: (q: string, offset?: number, limit?: number) => Promise<ReleasePage>;
   onPick: (r: Release) => Promise<void>;
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const [results, setResults] = useState<Release[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const loadingRef = useRef(false);
+  const offsetRef = useRef(0);
+  const queryRef = useRef("");
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -27,14 +33,50 @@ export function SearchPanel({
   }, [onClose]);
 
   const run = async () => {
-    if (!q.trim() || busy) return;
+    const term = q.trim();
+    if (!term || busy) return;
+    queryRef.current = term;
+    offsetRef.current = 0;
+    loadingRef.current = false;
     setBusy(true);
+    setResults(null);
+    setTotal(0);
+    setLoadingMore(false);
     try {
-      setResults(await onSearch(q.trim()));
+      const page = await onSearch(term, 0, 50);
+      offsetRef.current = page.releases.length;
+      setResults(page.releases);
+      setTotal(page.count);
+      bodyRef.current?.scrollTo({ top: 0 });
     } catch {
       setResults([]);
+      setTotal(0);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const loadMore = async () => {
+    if (loadingRef.current || busy || !results || results.length >= total) return;
+    const term = queryRef.current;
+    if (!term) return;
+    loadingRef.current = true;
+    setLoadingMore(true);
+    try {
+      const page = await onSearch(term, offsetRef.current, 50);
+      if (queryRef.current !== term) return;
+      setResults((prev) => {
+        const list = prev ?? [];
+        const seen = new Set(list.map((r) => r.id));
+        return [...list, ...page.releases.filter((r) => !seen.has(r.id))];
+      });
+      offsetRef.current += page.releases.length;
+      setTotal(page.count);
+    } catch {
+      /* 保持已有结果 */
+    } finally {
+      loadingRef.current = false;
+      setLoadingMore(false);
     }
   };
 
@@ -75,7 +117,16 @@ export function SearchPanel({
           </button>
         </div>
 
-        <div className="search-body">
+        <div
+          className="search-body"
+          ref={bodyRef}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            if (el.scrollHeight - el.scrollTop - el.clientHeight < 180) {
+              void loadMore();
+            }
+          }}
+        >
           {!results && !busy && (
             <div className="search-empty">
               <div className="search-empty-icon">◌</div>
@@ -114,11 +165,22 @@ export function SearchPanel({
               ))}
             </ul>
           )}
+          {loadingMore && (
+            <div className="search-more">
+              <span className="search-spinner" /> 加载更多…
+            </div>
+          )}
         </div>
 
         <div className="search-foot">
           <span>Enter 搜索 · Esc 关闭</span>
-          <span>{results ? `${results.length} 个结果` : ""}</span>
+          <span>
+            {results
+              ? total > results.length
+                ? `${results.length} / ${total} 个结果`
+                : `${results.length} 个结果`
+              : ""}
+          </span>
         </div>
       </div>
     </div>,

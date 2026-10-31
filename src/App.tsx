@@ -1115,7 +1115,8 @@ export default function App() {
     localStorage.setItem("sounddisc-favs", JSON.stringify([...next]));
   };
 
-  const onSearch = async (query: string) => await searchReleases(query);
+  const onSearch = async (query: string, offset = 0, limit = 50) =>
+    await searchReleases(query, offset, limit);
   const onPick = async (r: Release) => {
     if (disc) {
       const full = await confirmReleaseForDisc(disc.discid, r.id);

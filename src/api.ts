@@ -93,8 +93,15 @@ export const resolveDisc = (discid: string, device?: string | null) =>
   });
 export const confirmReleaseForDisc = (discid: string, releaseId: string) =>
   invoke<Release>("confirm_release_for_disc", { discid, releaseId });
-export const searchReleases = (query: string) =>
-  invoke<Release[]>("search_releases", { query });
+export interface ReleasePage {
+  releases: Release[];
+  count: number;
+  offset: number;
+  limit: number;
+}
+
+export const searchReleases = (query: string, offset = 0, limit = 50) =>
+  invoke<ReleasePage>("search_releases", { query, offset, limit });
 export const getRelease = (id: string) => invoke<Release>("get_release", { id });
 export const openMbSubmit = (tocString: string, releaseId: string | null) =>
   invoke<void>("open_mb_submit", { tocString, releaseId });

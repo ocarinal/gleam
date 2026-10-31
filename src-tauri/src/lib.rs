@@ -329,8 +329,14 @@ async fn confirm_release_for_disc(
 }
 
 #[tauri::command]
-async fn search_releases(query: String) -> Result<Vec<mb::Release>, String> {
-    tauri::async_runtime::spawn_blocking(move || mb::search_releases(&query))
+async fn search_releases(
+    query: String,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> Result<mb::ReleasePage, String> {
+    let offset = offset.unwrap_or(0) as usize;
+    let limit = limit.unwrap_or(50) as usize;
+    tauri::async_runtime::spawn_blocking(move || mb::search_releases(&query, offset, limit))
         .await
         .map_err(|e| format!("任务失败: {e}"))?
 }
@@ -427,6 +433,7 @@ fn resolve_cover(
         }
     }
     // 2) 网易云: 专辑名优先; 歌曲搜索只作为兜底
+    //    (相同译名时按标题长度选择, 例如 フィルム -> FILM 而不是 Stranger)
     //    (单曲"知らない"同样匹配到歌曲, 歌曲所在专辑可能是 Stranger, 会拿错封面)
     let mut netease_cover = netease::album_cover_url_by_album(title, artist).ok();
     if netease_cover.is_none() {
@@ -449,7 +456,13 @@ fn resolve_cover(
             return Some(format!("data:{mime};base64,{}", b64(&bytes)));
         }
     }
-    // 3) CAA (网易云没有时兜底)
+    // 3) CAA release 专属封面 (网易云没有时)
+    if let Ok(Some(path)) = cover::fetch(release_id, None, dir, &label) {
+        if let Some(d) = file_of(&path) {
+            return Some(d);
+        }
+    }
+    // 4) CAA release-group (最后兜底)
     if let Ok(Some(path)) = cover::fetch(release_id, rg_id.as_deref(), dir, &label) {
         if let Some(d) = file_of(&path) {
             return Some(d);
@@ -466,7 +479,7 @@ async fn fetch_cover(
     artist: String,
 ) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let dir = cache_dir().join("covers");
+        let dir = cache_dir().join("covers-v2");
         Ok(resolve_cover(&release_id, rg_id, &title, &artist, &dir))
     })
     .await
@@ -482,7 +495,7 @@ async fn refresh_cover(
     artist: String,
 ) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let dir = cache_dir().join("covers");
+        let dir = cache_dir().join("covers-v2");
         let label: String = release_id.chars().take(8).collect();
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for f in rd.flatten() {
@@ -667,7 +680,7 @@ async fn save_cover(release_id: String, data_url: String) -> Result<Option<Strin
             Some(_) => ("image/jpeg", "jpg"),
             None => return Err("不支持的封面格式".into()),
         };
-        let dir = cache_dir().join("covers");
+        let dir = cache_dir().join("covers-v2");
         std::fs::create_dir_all(&dir).map_err(|e| format!("创建封面目录失败: {e}"))?;
         let label: String = release_id.chars().take(8).collect();
         let f = dir.join(format!("{label}-{label}.{ext}"));
@@ -763,27 +776,40 @@ async fn library_cover(
     artist: String,
 ) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        // 1) 已下载的封面缓存 (取最新, 手动上传优先)
-        let dir = cache_dir().join("covers");
+        let dir = cache_dir().join("covers-v2");
+        let label: String = release_id.chars().take(8).collect();
+        let data_url = |path: &std::path::Path| -> Option<String> {
+            let bytes = std::fs::read(path).ok()?;
+            if !cover::is_complete_image(&bytes) {
+                return None;
+            }
+            let mime = match cover::image_ext(&bytes).unwrap_or("jpg") {
+                "png" => "image/png",
+                "webp" => "image/webp",
+                _ => "image/jpeg",
+            };
+            Some(format!("data:{mime};base64,{}", b64(&bytes)))
+        };
+
+        // 1) 已下载缓存 (手动上传优先)
         if let Some(f) = cover::find_cached(&release_id, &dir) {
-            if let Ok(bytes) = std::fs::read(&f) {
-                if cover::is_complete_image(&bytes) {
-                    let mime = match cover::image_ext(&bytes).unwrap_or("jpg") {
-                        "png" => "image/png",
-                        "webp" => "image/webp",
-                        _ => "image/jpeg",
-                    };
-                    return Ok(Some(format!("data:{mime};base64,{}", b64(&bytes))));
-                }
+            if let Some(d) = data_url(&f) {
+                return Ok(Some(d));
             }
         }
-        // 2) 网易云: 优先按专辑名匹配 (单曲不能拿同组专辑的封面)
+        // 2) 网易云专辑名匹配 (同分时选长度最近的标题)
         if let Ok(u) = netease::album_cover_url_by_album(&title, &artist) {
             if let Some((mime, bytes)) = netease_cover_bytes(Some(&u)) {
                 return Ok(Some(cache_cover_data(&release_id, &mime, &bytes)));
             }
         }
-        // 3) 专辑名搜不到时退回歌曲搜索
+        // 3) CAA release 专属封面
+        if let Ok(Some(path)) = cover::fetch(&release_id, None, &dir, &label) {
+            if let Some(d) = data_url(&path) {
+                return Ok(Some(d));
+            }
+        }
+        // 4) 单曲搜索兜底
         if let Ok(songs) = netease::search(&title, &artist, None) {
             if let Some(best) = songs.first() {
                 if let Ok(u) = netease::album_cover_url(best.id) {
@@ -839,7 +865,7 @@ fn netease_cover_data_url(pic_url: Option<&str>) -> Option<String> {
 /// 把下载的封面写入磁盘缓存, 返回可直接给 WebView 的 data URL。
 /// 库卡片重新挂载/搜索过滤后就不必再次联网取同一张图。
 fn cache_cover_data(release_id: &str, mime: &str, bytes: &[u8]) -> String {
-    let dir = cache_dir().join("covers");
+    let dir = cache_dir().join("covers-v2");
     let _ = std::fs::create_dir_all(&dir);
     let ext = match mime {
         "image/png" => "png",
