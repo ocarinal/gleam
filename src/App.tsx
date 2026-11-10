@@ -46,41 +46,78 @@ import { LibraryDetail, type CoverRect } from "./components/LibraryDetail";
 
 type View = "home" | "playing" | "tracks" | "info" | "library" | "settings";
 
-type ViewTransitionLike = { finished?: Promise<void> };
+type ViewTransitionLike = {
+  ready?: Promise<void>;
+  finished?: Promise<void>;
+  skipTransition: () => void;
+};
 
 type ViewTransitionDocument = Document & {
   startViewTransition?: (cb: () => void) => ViewTransitionLike;
 };
 
-/** 支持 View Transitions 时让封面从首页滑到舞台，否则直接切页 */
+let cancelViewTransition: (() => void) | undefined;
+let viewTransitionsFailed = false;
+
+/** 封面转场失败或超时时直接完成切页，后续跳转使用普通切页。 */
 function withViewTransition(fn: () => void) {
+  cancelViewTransition?.();
   const doc = document as ViewTransitionDocument;
-  if (!doc.startViewTransition) {
+  if (
+    !doc.startViewTransition ||
+    viewTransitionsFailed ||
+    document.visibilityState === "hidden" ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
     fn();
     return;
   }
+
   const root = document.documentElement;
-  root.classList.add("vt-busy");
+  let transition: ViewTransitionLike | undefined;
+  let ran = false;
   let finished = false;
+  const update = () => {
+    // skipTransition 仍可能调用浏览器排队的回调，切页只能执行一次。
+    if (ran) return;
+    ran = true;
+    flushSync(fn);
+  };
   const done = () => {
     if (finished) return;
     finished = true;
+    window.clearTimeout(timeout);
     root.classList.remove("vt-busy");
+    if (cancelViewTransition === cancel) cancelViewTransition = undefined;
   };
-  let ran = false;
+  const cancel = () => {
+    if (finished) return;
+    try {
+      transition?.skipTransition();
+    } finally {
+      done();
+      update();
+    }
+  };
+  const recover = () => {
+    if (finished) return;
+    viewTransitionsFailed = true;
+    cancel();
+  };
+  // 独立于 finished Promise，即使渲染器没有发出完成通知也能恢复。
+  const timeout = window.setTimeout(recover, 1200);
+  cancelViewTransition = cancel;
+  root.classList.add("vt-busy");
   try {
-    const vt = doc.startViewTransition(() => {
-      ran = true;
-      flushSync(fn);
-    });
-    if (vt?.finished) {
-      vt.finished.finally(done).catch(() => {});
+    transition = doc.startViewTransition(update);
+    transition.ready?.catch(recover);
+    if (transition.finished) {
+      void transition.finished.then(done, recover);
     } else {
-      setTimeout(done, 700);
+      recover();
     }
   } catch {
-    done();
-    if (!ran) fn();
+    recover();
   }
 }
 
@@ -814,10 +851,8 @@ export default function App() {
 
   /** 首页点曲目: 封面通过 View Transition 滑到右侧，页面切到正在播放 */
   const playFromHome = (no: number) => {
-    withViewTransition(() => {
-      void onPlay(no);
-      setView("playing");
-    });
+    void onPlay(no);
+    withViewTransition(() => setView("playing"));
   };
 
   const onTogglePause = async () => {

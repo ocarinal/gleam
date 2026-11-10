@@ -51,21 +51,18 @@ body {
   pointer-events: none;
   transition: background-image 0.6s;
   animation: amb-drift 14s ease-in-out infinite alternate;
-  will-change: transform, filter;
+  will-change: transform;
 }
-/* Apple Music 式: 大幅度漂移 + 色调扫动 */
+/* 固定模糊滤镜，仅动画化漂移以降低逐帧绘制开销。 */
 @keyframes amb-drift {
   0% {
     transform: scale(1.1) translate(-12%, 8%) rotate(-5deg);
-    filter: blur(100px) saturate(1.45) brightness(0.3) hue-rotate(-18deg);
   }
   50% {
     transform: scale(1.42) translate(10%, -11%) rotate(4.5deg);
-    filter: blur(130px) saturate(1.6) brightness(0.5) hue-rotate(16deg);
   }
   100% {
     transform: scale(1.2) translate(-6%, 7%) rotate(-3deg);
-    filter: blur(112px) saturate(1.35) brightness(0.26) hue-rotate(-10deg);
   }
 }
 /* 第二光斑: 反向相位漂移, 交叠产生"流动"感 */
@@ -76,16 +73,14 @@ body {
   pointer-events: none;
   animation: amb-drift2 22s ease-in-out infinite alternate;
   animation-delay: -11s;
-  will-change: transform, filter;
+  will-change: transform;
 }
 @keyframes amb-drift2 {
   0% {
     transform: scale(1.32) translate(11%, -8%) rotate(4.5deg);
-    filter: blur(140px) saturate(1.6) brightness(0.5) hue-rotate(16deg);
   }
   100% {
     transform: scale(1.08) translate(-12%, 9%) rotate(-5deg);
-    filter: blur(152px) saturate(1.5) brightness(0.38) hue-rotate(-20deg);
   }
 }
 /* 旋转扫光: 24s 一圈的光柱 */
@@ -698,28 +693,36 @@ body {
 }
 .home-track.playing .home-track-dur { color: rgba(255,255,255,.5); }
 
-/* 共享封面: 首页 -> 正在播放 */
-.cover-vt { view-transition-name: album-cover; }
+/* 首页 -> 正在播放只捕获封面，避免生成两张全窗口快照。 */
+html.vt-busy { view-transition-name: none; }
+html.vt-busy .cover-vt { view-transition-name: album-cover; }
 ::view-transition-group(album-cover) {
-  animation-duration: 420ms;
+  animation-duration: 360ms;
   animation-timing-function: cubic-bezier(.2,.8,.2,1);
 }
 ::view-transition-old(album-cover),
 ::view-transition-new(album-cover) {
-  animation-duration: 420ms;
+  animation-duration: 360ms;
+  mix-blend-mode: normal;
 }
-/* 整页交叉淡入在 WebKit 下要复制两层带模糊的大图，容易卡；
-   这里只让封面做共享元素动画，页面内容直接切换。 */
+/* 只保留新封面，避免同一张封面在缩放时重复混合。 */
+::view-transition-old(album-cover) { display: none; }
+::view-transition-new(album-cover) { animation: none; }
+/* 兼容仍然生成 root 快照的引擎，底下的实时页面直接呈现。 */
 ::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
-}
-/* 转场期间关掉重滤镜/动态背景，减少合成压力 */
+::view-transition-new(root) { display: none; }
+/* 捕获和移动期间移除额外氛围层及毛玻璃，保留静态主背景。 */
 html.vt-busy .amb-blob,
 html.vt-busy .amb-sweep { display: none; }
 html.vt-busy .app-body::before { animation: none; }
-html.vt-busy .navside,
-html.vt-busy .track-panel { backdrop-filter: none; }
+html.vt-busy .app-body * {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+html.vt-busy .stage-art {
+  transition: none;
+  transform: none;
+}
 
 /* ---------- 舞台右上工具条 ---------- */
 .playing-head-row {
@@ -4380,7 +4383,7 @@ button.group-row:hover .group-open { opacity: 1; }
   filter: blur(110px) saturate(1.45) brightness(.42);
   transform: scale(1.2);
   animation: amb-drift 14s ease-in-out infinite alternate;
-  will-change: transform, filter;
+  will-change: transform;
 }
 .lib-detail-amb-blob {
   position: absolute;
@@ -4391,7 +4394,7 @@ button.group-row:hover .group-open { opacity: 1; }
   filter: blur(140px) saturate(1.6) brightness(.5);
   animation: amb-drift2 22s ease-in-out infinite alternate;
   animation-delay: -11s;
-  will-change: transform, filter;
+  will-change: transform;
 }
 .lib-detail-amb-sweep {
   position: absolute;

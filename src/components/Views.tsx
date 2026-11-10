@@ -560,7 +560,7 @@ export function SettingsView({
         </div>
         <div className="set-row">
           <span>版本</span>
-          <span className="set-val">Gleam 1.0.0 · Tauri 2 · libmpv</span>
+          <span className="set-val">Gleam 1.1.1 · Tauri 2 · libmpv</span>
         </div>
       </div>
     </div>
